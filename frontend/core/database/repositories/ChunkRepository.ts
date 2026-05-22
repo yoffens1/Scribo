@@ -3,29 +3,10 @@ import { normalizePath } from "@utils/pathUtils";
 import type { ChunkData, ChunkDataWithPath, FullChunkData } from "../../retrieval/types/chunk";
 import type { ChunkSource } from "../../retrieval/types/chunk-source";
 
-function uint8ToBase64(u8: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < u8.length; i++) {
-    binary += String.fromCharCode(u8[i]);
-  }
-  return "base64:" + btoa(binary);
-}
-
-function base64ToFloat32Array(base64: string): Float32Array {
-  if (base64.startsWith("base64:")) {
-    base64 = base64.substring(7);
-  }
-  const raw = atob(base64);
-  const u8 = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    u8[i] = raw.charCodeAt(i);
-  }
-  // The first byte was prepended by EmbeddingSerializer in old DB format, 
-  // but if it's raw we might need to skip it depending on logic.
-  // Actually, we skip the first byte as per original logic:
-  const payload = u8.subarray(1);
-  const buf = new ArrayBuffer(payload.byteLength);
-  new Uint8Array(buf).set(payload);
+function uint8ToFloat32Array(data: number[] | Uint8Array): Float32Array {
+  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const buf = new ArrayBuffer(u8.byteLength);
+  new Uint8Array(buf).set(u8);
   return new Float32Array(buf);
 }
 
@@ -44,7 +25,7 @@ export class ChunkRepository implements ChunkSource {
       chunkIndex: r.chunkIndex,
       text: r.text,
       tokens: r.tokens,
-      embedding: uint8ToBase64(r.embedding instanceof Uint8Array ? r.embedding : new Uint8Array(r.embedding.buffer))
+      embedding: Array.from(r.embedding instanceof Uint8Array ? r.embedding : new Uint8Array(r.embedding.buffer))
     }));
 
     await invoke("chunks_insert", { fileId, rows: serializedRows });
@@ -58,14 +39,14 @@ export class ChunkRepository implements ChunkSource {
     const records = await invoke<Array<{
       chunkIndex: number;
       chunkText: string | null;
-      embedding: string;
+      embedding: number[];
       tokenCount: number | null;
     }>>("chunks_get_by_file_path", { filePath: cleanPath, includeDeleted });
 
     return records.map(r => ({
       chunkIndex: r.chunkIndex,
       chunkText: r.chunkText || undefined,
-      embedding: base64ToFloat32Array(r.embedding),
+      embedding: uint8ToFloat32Array(r.embedding),
       tokenCount: r.tokenCount || undefined,
     }));
   }
@@ -77,7 +58,7 @@ export class ChunkRepository implements ChunkSource {
       chunkIndex: number;
       chunkText: string | null;
       tokenCount: number | null;
-      embedding: string;
+      embedding: number[];
     }>>("chunks_get_all", { includeDeleted });
 
     return records.map(r => ({
@@ -86,7 +67,7 @@ export class ChunkRepository implements ChunkSource {
       chunkIndex: r.chunkIndex,
       chunkText: r.chunkText || undefined,
       tokenCount: r.tokenCount || undefined,
-      embedding: base64ToFloat32Array(r.embedding),
+      embedding: uint8ToFloat32Array(r.embedding),
     }));
   }
 
@@ -96,7 +77,7 @@ export class ChunkRepository implements ChunkSource {
       chunkIndex: number;
       chunkText: string | null;
       tokenCount: number | null;
-      embedding: string;
+      embedding: number[];
     }>>("chunks_get_by_file_name", { name, includeDeleted });
 
     return records.map(r => ({
@@ -104,7 +85,7 @@ export class ChunkRepository implements ChunkSource {
       chunkIndex: r.chunkIndex,
       chunkText: r.chunkText || undefined,
       tokenCount: r.tokenCount || undefined,
-      embedding: base64ToFloat32Array(r.embedding),
+      embedding: uint8ToFloat32Array(r.embedding),
     }));
   }
 }

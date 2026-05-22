@@ -1,43 +1,29 @@
-use tauri::State;
-use crate::DbState;
 use crate::error::AppError;
+use crate::DbState;
+use tauri::State;
 
+/// VACUUM is the most expensive SQLite operation (~O(db_size)).
+/// We run it in a dedicated blocking thread to avoid tying up Tauri's
+/// async IPC worker pool for potentially several seconds.
 #[tauri::command]
-pub fn db_begin_transaction(state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut opt_conn = state.0.lock();
-    let conn = opt_conn.as_mut().ok_or(AppError::NotInitialized)?;
-    conn.execute_batch("BEGIN TRANSACTION;")?;
-    Ok(())
-}
+pub async fn db_vacuum(state: State<'_, DbState>) -> Result<(), AppError> {
+    let pool = state.inner().pool.read().as_ref().cloned().ok_or(AppError::NotInitialized)?;
 
-#[tauri::command]
-pub fn db_commit_transaction(state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut opt_conn = state.0.lock();
-    let conn = opt_conn.as_mut().ok_or(AppError::NotInitialized)?;
-    conn.execute_batch("COMMIT;")?;
-    Ok(())
-}
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = pool.get().map_err(|e| AppError::Other(e.to_string()))?;
+        conn.execute_batch("VACUUM;")?;
+        Ok::<(), AppError>(())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
-#[tauri::command]
-pub fn db_rollback_transaction(state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut opt_conn = state.0.lock();
-    let conn = opt_conn.as_mut().ok_or(AppError::NotInitialized)?;
-    let _ = conn.execute_batch("ROLLBACK;");
-    Ok(())
-}
-
-#[tauri::command]
-pub fn db_vacuum(state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut opt_conn = state.0.lock();
-    let conn = opt_conn.as_mut().ok_or(AppError::NotInitialized)?;
-    conn.execute_batch("VACUUM;")?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn db_optimize(state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut opt_conn = state.0.lock();
-    let conn = opt_conn.as_mut().ok_or(AppError::NotInitialized)?;
-    conn.execute_batch("PRAGMA optimize;")?;
-    Ok(())
+    state.with_conn(|conn| {
+        conn.execute_batch("PRAGMA optimize;")?;
+        Ok(())
+    })
 }

@@ -4,13 +4,13 @@ use serde::Serialize;
 pub enum AppError {
     #[error("DB error: {0}")]
     Db(#[from] rusqlite::Error),
-    
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Database not initialized")]
     NotInitialized,
-    
+
     #[error("{0}")]
     Other(String),
 }

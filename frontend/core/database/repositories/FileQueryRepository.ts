@@ -33,17 +33,18 @@ export class FileQueryRepository {
   }
 
   async getFilesMap(): Promise<Map<string, FileDBInfo>> {
-    const record = await invoke<Record<string, {
-      isDeleted: boolean;
-      mtime: number | null;
-      model: string | null;
-      chunkVer: string | null;
-    }>>("files_get_map");
-    
+    const files = await this.getAllFiles();
     const dbFiles = new Map<string, FileDBInfo>();
-    for (const [key, value] of Object.entries(record)) {
-      dbFiles.set(key, value);
+    
+    for (const file of files) {
+      dbFiles.set(file.filePath, {
+        isDeleted: file.isDeleted === 1,
+        mtime: file.mtime,
+        model: file.model,
+        chunkVer: file.chunkVer,
+      });
     }
+    
     return dbFiles;
   }
 }

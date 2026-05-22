@@ -29,17 +29,7 @@ export class TauriDbConnection {
   async save(): Promise<void> {}
 
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
-    await invoke("db_begin_transaction");
-    try {
-      const result = await fn();
-      await invoke("db_commit_transaction");
-      return result;
-    } catch (error) {
-      try {
-        await invoke("db_rollback_transaction");
-      } catch {}
-      throw error;
-    }
+    return await fn();
   }
 
   async close(): Promise<void> {

@@ -18,7 +18,14 @@ export class FileRepository {
     return await invoke<FileRecord | null>("files_get_by_path", { path: cleanPath });
   }
 
-  async insertIndexing(params: {
+  /**
+   * Atomic upsert: inserts a new file row or updates an existing one, both
+   * with status='indexing'. Returns the file_id of the affected row.
+   *
+   * Replaces the old insertIndexing + updateIndexing pair that required
+   * a prior getByPath call and had a TOCTOU race condition.
+   */
+  async upsertIndexing(params: {
     cleanPath: string;
     fileName: string;
     fileHash: string;
@@ -28,25 +35,7 @@ export class FileRepository {
     chunkingVersion: string;
     updatedAt: number;
   }): Promise<number> {
-    return await invoke<number>("files_insert_indexing", { params });
-  }
-
-  async updateIndexing(params: {
-    fileHash: string;
-    fileMtime: number | null;
-    embeddingModel: string;
-    embeddingDim: number;
-    chunkingVersion: string;
-    updatedAt: number;
-    fileName: string;
-    fileId: number;
-  }): Promise<void> {
-    await invoke("files_update_indexing", { params });
-  }
-
-  async exists(filePath: string): Promise<boolean> {
-    const cleanPath = normalizePath(filePath);
-    return await invoke<boolean>("files_exists", { path: cleanPath });
+    return await invoke<number>("files_upsert_indexing", { params });
   }
 
   // ── Delegated ──
