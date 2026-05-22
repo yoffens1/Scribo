@@ -4,7 +4,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 mod commands;
 mod error;
-mod schema;
+pub mod schema;
 
 pub use error::AppError;
 

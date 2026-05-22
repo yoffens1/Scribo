@@ -36,6 +36,5 @@
     },
     "types": ["node"]
   },
-  "include": ["frontend", "frontend/**/*.ts", "frontend/**/*.tsx"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["frontend", "frontend/**/*.ts", "frontend/**/*.tsx", "vite.config.ts"]
 }

@@ -1,37 +1,8 @@
 use rusqlite::{Connection, Transaction};
 use crate::error::AppError;
+use crate::schema::helpers::add_column_if_missing;
 
-pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
-    // check_integrity MUST run first: if the DB is corrupt we want to fail fast
-    // before doing any writes or migrations.
-    check_integrity(conn)?;
-
-    create_meta(conn)?;
-    let version = get_schema_version(conn)?;
-    create_files(conn)?;
-    create_chunks(conn)?;
-    create_cards(conn)?;
-    create_history_tables(conn)?;
-    apply_migrations(conn, version)?;
-
-    // SAFETY: recover_interrupted must only be called during initial startup,
-    // BEFORE any db operations. Otherwise it risks wiping active indexer work.
-    recover_interrupted(conn)?;
-
-    Ok(())
-}
-
-fn create_meta(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );"
-    )?;
-    Ok(())
-}
-
-fn get_schema_version(conn: &Connection) -> Result<i32, AppError> {
+pub fn get_schema_version(conn: &Connection) -> Result<i32, AppError> {
     let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = 'schema_version'")?;
     let mut rows = stmt.query([])?;
 
@@ -44,7 +15,7 @@ fn get_schema_version(conn: &Connection) -> Result<i32, AppError> {
     }
 }
 
-fn set_schema_version(conn: &Connection, version: i32) -> Result<(), AppError> {
+pub fn set_schema_version(conn: &Connection, version: i32) -> Result<(), AppError> {
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -53,103 +24,7 @@ fn set_schema_version(conn: &Connection, version: i32) -> Result<(), AppError> {
     Ok(())
 }
 
-fn create_files(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS files (
-            file_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT NOT NULL UNIQUE,
-            file_name TEXT NOT NULL,
-            file_hash TEXT,
-            file_mtime INTEGER,
-            embedding_model TEXT DEFAULT 'unknown',
-            embedding_dimension INTEGER,
-            chunking_version TEXT DEFAULT '1',
-            source_file_id INTEGER REFERENCES files(file_id) ON DELETE SET NULL,
-            is_deleted INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'indexed',
-            last_error TEXT,
-            updated_at INTEGER,
-            indexed_at INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_files_path ON files(file_path);"
-    )?;
-    Ok(())
-}
-
-fn create_chunks(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS chunks (
-            chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-            chunk_index INTEGER NOT NULL,
-            chunk_text TEXT,
-            token_count INTEGER,
-            embedding BLOB NOT NULL,
-            UNIQUE(file_id, chunk_index)
-        );
-        CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id);
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-            chunk_text,
-            content='chunks',
-            content_rowid='chunk_id',
-            tokenize='unicode61 remove_diacritics 1'
-        );
-
-        CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks BEGIN
-          INSERT INTO chunks_fts(rowid, chunk_text) VALUES (new.chunk_id, new.chunk_text);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks BEGIN
-          INSERT INTO chunks_fts(chunks_fts, rowid, chunk_text) VALUES('delete', old.chunk_id, old.chunk_text);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON chunks BEGIN
-          INSERT INTO chunks_fts(chunks_fts, rowid, chunk_text) VALUES('delete', old.chunk_id, old.chunk_text);
-          INSERT INTO chunks_fts(rowid, chunk_text) VALUES (new.chunk_id, new.chunk_text);
-        END;"
-    )?;
-    Ok(())
-}
-
-fn create_cards(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS cards (
-            card_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL UNIQUE,
-            anki_note_id INTEGER,
-            state TEXT DEFAULT 'new',
-            reps INTEGER DEFAULT 0,
-            interval_days INTEGER DEFAULT 0,
-            ease_factor REAL DEFAULT 2.5,
-            next_review INTEGER,
-            last_reviewed INTEGER,
-            FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_cards_file_id ON cards(file_id);"
-    )?;
-    Ok(())
-}
-
-fn create_history_tables(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS files_history (
-            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-            patch TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS review_logs (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            card_id INTEGER NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
-            rating INTEGER NOT NULL,
-            reviewed_at INTEGER NOT NULL
-         );"
-    )?;
-    Ok(())
-}
-
-fn apply_migrations(conn: &mut Connection, mut from_version: i32) -> Result<(), AppError> {
+pub fn apply_migrations(conn: &mut Connection, mut from_version: i32) -> Result<(), AppError> {
     let tx = conn.transaction()?;
 
     if from_version < 1 {
@@ -181,55 +56,17 @@ fn apply_migrations(conn: &mut Connection, mut from_version: i32) -> Result<(), 
         set_schema_version(&tx, 6)?;
         from_version = 6;
     }
-
     if from_version < 7 {
         migrate_v7(&tx)?;
         set_schema_version(&tx, 7)?;
+        from_version = 7;
+    }
+    if from_version < 8 {
+        migrate_v8(&tx)?;
+        set_schema_version(&tx, 8)?;
     }
 
     tx.commit()?;
-    Ok(())
-}
-
-fn migrate_v7(conn: &Transaction) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS files_history (
-            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-            patch TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS review_logs (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            card_id INTEGER NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
-            rating INTEGER NOT NULL,
-            reviewed_at INTEGER NOT NULL
-         );"
-    )?;
-    Ok(())
-}
-
-fn column_exists(conn: &Transaction, table: &str, column: &str) -> Result<bool, AppError> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info('{}')", table))?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let name: String = row.get(1)?;
-        if name == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn add_column_if_missing(
-    conn: &Transaction,
-    table: &str,
-    col: &str,
-    def: &str,
-) -> Result<(), AppError> {
-    if !column_exists(conn, table, col)? {
-        conn.execute_batch(&format!("ALTER TABLE {} ADD COLUMN {} {};", table, col, def))?;
-    }
     Ok(())
 }
 
@@ -253,6 +90,7 @@ fn migrate_v2(conn: &Transaction) -> Result<(), AppError> {
 }
 
 fn drop_metadata_column(conn: &Transaction) -> Result<(), AppError> {
+    use crate::schema::helpers::column_exists;
     if column_exists(conn, "chunks", "metadata")? {
         conn.execute_batch("ALTER TABLE chunks DROP COLUMN metadata;")?;
     }
@@ -274,27 +112,10 @@ fn migrate_v5(conn: &Transaction) -> Result<(), AppError> {
         "source_file_id",
         "INTEGER REFERENCES files(file_id) ON DELETE SET NULL",
     )?;
-    // create_cards is idempotent (CREATE TABLE IF NOT EXISTS), safe to call again.
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS cards (
-            card_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL UNIQUE,
-            anki_note_id INTEGER,
-            state TEXT DEFAULT 'new',
-            reps INTEGER DEFAULT 0,
-            interval_days INTEGER DEFAULT 0,
-            ease_factor REAL DEFAULT 2.5,
-            next_review INTEGER,
-            last_reviewed INTEGER,
-            FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_cards_file_id ON cards(file_id);"
-    )?;
     Ok(())
 }
 
 fn migrate_v6(conn: &Transaction) -> Result<(), AppError> {
-    // Add FTS5 virtual table and sync triggers for full-text search on chunk_text.
     conn.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
             chunk_text,
@@ -314,47 +135,66 @@ fn migrate_v6(conn: &Transaction) -> Result<(), AppError> {
         CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON chunks BEGIN
           INSERT INTO chunks_fts(chunks_fts, rowid, chunk_text) VALUES('delete', old.chunk_id, old.chunk_text);
           INSERT INTO chunks_fts(rowid, chunk_text) VALUES (new.chunk_id, new.chunk_text);
-        END;"
+        END;
+        
+        INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');"
     )?;
-
-    // Backfill existing chunks into the FTS index.
-    conn.execute_batch("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');")?;
-
     Ok(())
 }
 
-fn recover_interrupted(conn: &Connection) -> Result<(), AppError> {
+fn migrate_v7(conn: &Transaction) -> Result<(), AppError> {
     conn.execute_batch(
-        "DELETE FROM chunks WHERE file_id IN (SELECT file_id FROM files WHERE status = 'indexing');
-         UPDATE files SET status = 'failed', last_error = 'Interrupted indexing' WHERE status = 'indexing';"
+        "CREATE TABLE IF NOT EXISTS files_history (
+            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
+            patch TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS review_logs (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+            rating INTEGER NOT NULL,
+            reviewed_at INTEGER NOT NULL
+         );"
     )?;
     Ok(())
 }
 
-fn check_integrity(conn: &Connection) -> Result<(), AppError> {
-    let mut stmt = conn.prepare("PRAGMA integrity_check;")?;
-    let mut rows = stmt.query([])?;
-
-    if let Some(row) = rows.next()? {
-        let val: String = row.get(0)?;
-        if val != "ok" {
-            return Err(AppError::Other(
-                "Database corruption detected! Integrity check failed.".to_string(),
-            ));
-        }
+fn migrate_v8(conn: &Transaction) -> Result<(), AppError> {
+    use crate::schema::helpers::column_exists;
+    
+    // Rename SM-2 columns to FSRS terminology and add difficulty
+    if column_exists(conn, "cards", "interval_days")? {
+        conn.execute_batch(
+            "ALTER TABLE cards RENAME COLUMN interval_days TO lapses;
+             ALTER TABLE cards RENAME COLUMN ease_factor TO stability;
+             ALTER TABLE cards ADD COLUMN difficulty REAL DEFAULT 0.0;"
+        )?;
+    } else if !column_exists(conn, "cards", "difficulty")? {
+        // Fallback if somehow created without interval_days but lacking difficulty
+        conn.execute_batch("ALTER TABLE cards ADD COLUMN difficulty REAL DEFAULT 0.0;")?;
     }
+
+    // Drop redundant indexes (file_path is UNIQUE, file_id is UNIQUE, etc.)
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS idx_files_path;
+         DROP INDEX IF EXISTS idx_chunks_file_id;
+         DROP INDEX IF EXISTS idx_cards_file_id;"
+    )?;
+    
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::initialize_schema;
+    use crate::schema::helpers::column_exists;
 
     fn open() -> Connection {
         Connection::open_in_memory().unwrap()
     }
 
-    // Idempotency
     #[test]
     fn test_migrations_idempotency() {
         let mut conn = open();
@@ -362,7 +202,6 @@ mod tests {
         initialize_schema(&mut conn).expect("Second initialization failed — not idempotent");
     }
 
-    // column_exists helper
     #[test]
     fn test_column_exists() {
         let conn = open();
@@ -374,7 +213,6 @@ mod tests {
         tx.rollback().unwrap();
     }
 
-    // add_column_if_missing is idempotent
     #[test]
     fn test_add_column_if_missing_idempotent() {
         let mut conn = open();
@@ -382,16 +220,16 @@ mod tests {
         let tx = conn.transaction().unwrap();
         add_column_if_missing(&tx, "t2", "extra", "INTEGER DEFAULT 0").unwrap();
         tx.commit().unwrap();
-        // Second call must not error
+        
         let tx = conn.transaction().unwrap();
         add_column_if_missing(&tx, "t2", "extra", "INTEGER DEFAULT 0").unwrap();
         tx.commit().unwrap();
+        
         let tx = conn.transaction().unwrap();
         assert!(column_exists(&tx, "t2", "extra").unwrap());
         tx.rollback().unwrap();
     }
 
-    // FTS INSERT trigger
     #[test]
     fn test_fts_search_after_init() {
         let mut conn = open();
@@ -411,7 +249,6 @@ mod tests {
         assert_eq!(count, 1, "INSERT trigger must index the chunk into FTS");
     }
 
-    // migrate_v6 backfills pre-existing data
     #[test]
     fn test_fts_backfill_on_migrate_v6() {
         let mut conn = open();
@@ -448,7 +285,6 @@ mod tests {
         assert_eq!(count, 1, "migrate_v6 must backfill pre-existing chunks into FTS");
     }
 
-    // Full migration progression from v0
     #[test]
     fn test_migration_progression_from_v0() {
         let mut conn = open();
@@ -475,6 +311,6 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(version, 6, "Schema version must be 6 after full migration");
+        assert_eq!(version, 8, "Schema version must be 8 after full migration");
     }
 }

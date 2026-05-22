@@ -4940,8 +4940,10 @@ name = "scribo"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytemuck",
  "chrono",
  "diffy",
+ "dirs 6.0.0",
  "fsrs",
  "parking_lot",
  "r2d2",

@@ -360,9 +360,8 @@ fn now_ms_for_diff() -> i64 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
-pub fn files_update_content_with_diff(
-    state: State<'_, DbState>,
+pub fn files_update_content_with_diff_impl(
+    state: &DbState,
     file_id: i64,
     new_content: String,
 ) -> Result<(), AppError> {
@@ -396,4 +395,13 @@ pub fn files_update_content_with_diff(
         tx.commit()?;
         Ok(())
     })
+}
+
+#[tauri::command]
+pub fn files_update_content_with_diff(
+    state: State<'_, DbState>,
+    file_id: i64,
+    new_content: String,
+) -> Result<(), AppError> {
+    files_update_content_with_diff_impl(&state, file_id, new_content)
 }

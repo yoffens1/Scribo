@@ -204,27 +204,26 @@ pub fn chunks_search(
 
 // ── Vector semantic search ──────────────────────────────────────────────────
 
+fn bytes_to_f32_slice(bytes: &[u8]) -> &[f32] {
+    bytemuck::cast_slice(bytes)
+}
+
 fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
     let mut dot_product = 0.0;
     let mut norm_a = 0.0;
     let mut norm_b = 0.0;
-    for i in 0..v1.len() {
-        dot_product += v1[i] * v2[i];
-        norm_a += v1[i] * v1[i];
-        norm_b += v2[i] * v2[i];
+    
+    for (a, b) in v1.iter().zip(v2.iter()) {
+        dot_product += a * b;
+        norm_a += a * a;
+        norm_b += b * b;
     }
+    
     if norm_a == 0.0 || norm_b == 0.0 {
         0.0
     } else {
         dot_product / (norm_a.sqrt() * norm_b.sqrt())
     }
-}
-
-fn bytes_to_f32_vec(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
-        .collect()
 }
 
 #[derive(Serialize)]
@@ -238,14 +237,17 @@ pub struct VectorSearchHit {
 }
 
 #[tauri::command]
-pub fn chunks_vector_search(
+pub async fn chunks_vector_search(
     state: State<'_, DbState>,
     query_embedding_bytes: Vec<u8>,
     limit: usize,
 ) -> Result<Vec<VectorSearchHit>, AppError> {
-    let query_vector = bytes_to_f32_vec(&query_embedding_bytes);
+    let pool = state.inner().pool.read().as_ref().cloned().ok_or(AppError::NotInitialized)?;
 
-    state.with_conn(|conn| {
+    tauri::async_runtime::spawn_blocking(move || {
+        let query_vector = bytes_to_f32_slice(&query_embedding_bytes);
+        let conn = pool.get().map_err(|e| AppError::Other(e.to_string()))?;
+
         let mut stmt = conn.prepare(
             "SELECT c.chunk_id, f.file_path, c.chunk_index, c.chunk_text, c.embedding
              FROM chunks c
@@ -258,10 +260,12 @@ pub fn chunks_vector_search(
             let file_path: String = row.get(1)?;
             let chunk_index: i64 = row.get(2)?;
             let chunk_text: Option<String> = row.get(3)?;
+            // SQLite returns the BLOB as a Vec<u8> natively. 
+            // We get ownership of it, then borrow it to get a slice.
             let blob_bytes: Vec<u8> = row.get(4)?;
             
-            let cand_vector = bytes_to_f32_vec(&blob_bytes);
-            let similarity = cosine_similarity(&query_vector, &cand_vector);
+            let cand_vector = bytes_to_f32_slice(&blob_bytes);
+            let similarity = cosine_similarity(query_vector, cand_vector);
 
             Ok(VectorSearchHit {
                 chunk_id,
@@ -278,4 +282,6 @@ pub fn chunks_vector_search(
 
         Ok(hits)
     })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }

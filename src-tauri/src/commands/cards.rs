@@ -16,7 +16,7 @@ pub struct CardReviewParams {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewResult {
-    pub scheduled_days: u32,
+    pub scheduled_days: f32,
     pub next_review: i64,
 }
 
@@ -24,8 +24,8 @@ pub struct ReviewResult {
 pub fn cards_insert_ignore(state: State<'_, DbState>, file_id: i64) -> Result<(), AppError> {
     state.with_conn(|conn| {
         conn.execute(
-            "INSERT OR IGNORE INTO cards (file_id, state, reps, interval_days, ease_factor)
-             VALUES (?, 'new', 0, 0, 2.5)",
+            "INSERT OR IGNORE INTO cards (file_id, state, reps, lapses, stability, difficulty)
+             VALUES (?, 'new', 0, 0, 0.0, 0.0)",
             rusqlite::params![file_id],
         )?;
         Ok(())
@@ -33,8 +33,8 @@ pub fn cards_insert_ignore(state: State<'_, DbState>, file_id: i64) -> Result<()
 }
 
 #[tauri::command]
-pub fn cards_review_fsrs(
-    state: State<'_, DbState>,
+pub fn cards_review_fsrs_impl(
+    state: &DbState,
     params: CardReviewParams,
 ) -> Result<ReviewResult, AppError> {
     let _w = state.write_lock.lock();
@@ -45,22 +45,23 @@ pub fn cards_review_fsrs(
 
         // 1. Load current parameters. Since we only have interval_days (lapses) and ease_factor (stability)
         // we'll use a fixed difficulty for the missing state, or re-compute.
-        let (mut reps, mut lapses, stability, last_reviewed, state_str) = tx.query_row(
-            "SELECT reps, interval_days, ease_factor, last_reviewed, state FROM cards WHERE card_id = ?",
+        let (mut reps, mut lapses, stability, difficulty, last_reviewed, state_str) = tx.query_row(
+            "SELECT reps, lapses, stability, difficulty, last_reviewed, state FROM cards WHERE card_id = ?",
             rusqlite::params![params.card_id],
             |row| {
                 Ok((
                     row.get::<_, i32>(0)?,
-                    row.get::<_, i32>(1)?, // interval_days is used as lapses in this schema
-                    row.get::<_, f64>(2)?, // ease_factor is used as stability
-                    row.get::<_, Option<i64>>(3)?, // last_reviewed timestamp
-                    row.get::<_, String>(4)?, // state
+                    row.get::<_, i32>(1)?, // lapses
+                    row.get::<_, f64>(2)?, // stability
+                    row.get::<_, f64>(3)?, // difficulty
+                    row.get::<_, Option<i64>>(4)?, // last_reviewed timestamp
+                    row.get::<_, String>(5)?, // state
                 ))
             },
         )?;
 
-        // FSRS v5 inference API
-        let fsrs = FSRS::new(None).map_err(|e| AppError::Other(e.to_string()))?;
+        // FSRS v5 inference API requires parameters to be set on creation. We use the default ones.
+        let fsrs = FSRS::new(Some(&fsrs::DEFAULT_PARAMETERS)).map_err(|e| AppError::Other(e.to_string()))?;
         
         // Compute elapsed days
         let days_elapsed = if let Some(lr) = last_reviewed {
@@ -76,7 +77,7 @@ pub fn cards_review_fsrs(
         } else {
             Some(MemoryState {
                 stability: stability as f32,
-                difficulty: 5.0, // FSRS needs difficulty, but we don't store it. We'll assume a default of 5.0.
+                difficulty: difficulty as f32,
             })
         };
 
@@ -96,8 +97,8 @@ pub fn cards_review_fsrs(
             lapses += 1;
         }
 
-        let scheduled_days = new_state.interval.round() as u32;
-        let next_review = now.timestamp() + (scheduled_days as i64 * 86400);
+        let scheduled_days = new_state.interval;
+        let next_review = now.timestamp() + (scheduled_days as f64 * 86400.0) as i64;
         let updated_state_str = if state_str == "new" { "learning" } else { "review" };
 
         // 5. Save back to SQLite
@@ -105,8 +106,9 @@ pub fn cards_review_fsrs(
             "UPDATE cards SET 
                 state = ?, 
                 reps = ?, 
-                interval_days = ?, -- lapses
-                ease_factor = ?,   -- stability
+                lapses = ?,
+                stability = ?,
+                difficulty = ?,
                 next_review = ?, 
                 last_reviewed = ? 
              WHERE card_id = ?",
@@ -115,6 +117,7 @@ pub fn cards_review_fsrs(
                 reps,
                 lapses,
                 new_state.memory.stability as f64,
+                new_state.memory.difficulty as f64,
                 next_review,
                 now.timestamp(),
                 params.card_id
@@ -134,4 +137,12 @@ pub fn cards_review_fsrs(
             next_review,
         })
     })
+}
+
+#[tauri::command]
+pub fn cards_review_fsrs(
+    state: State<'_, DbState>,
+    params: CardReviewParams,
+) -> Result<ReviewResult, AppError> {
+    cards_review_fsrs_impl(&state, params)
 }
