@@ -7,10 +7,21 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "db": "npx tsx frontend/test/cli/db.test.ts",
+    "test": "npx tsx --test frontend/test/**/*.test.ts",
+    "test:ai": "npx tsx --test frontend/test/llm/*.test.ts frontend/test/transport/*.test.ts frontend/test/transport/stream/*.test.ts frontend/test/events/*.test.ts",
+    "test:chunker": "npx tsx --test frontend/test/chunker/Chunker.test.ts",
+    "test:refinery": "npx tsx --test frontend/test/refinery/**/*.test.ts",
+    "refinery": "npx tsx frontend/test/cli/refinery.test.ts",
+    "inbox": "npx tsx frontend/test/cli/refine-inbox.ts",
+    "test:refinery:unit": "npx tsx --test frontend/test/refinery/unit/*.test.ts",
+    "test:refinery:integration": "npx tsx --test frontend/test/refinery/integration/*.test.ts",
+    "test:integration": "npx tsx --test frontend/test/database/integration/*.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
     "eldr": "^1.1.0",
     "fuse.js": "^7.3.0",
@@ -19,9 +30,12 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^25.6.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }

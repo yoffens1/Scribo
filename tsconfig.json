@@ -16,10 +16,26 @@
 
     /* Linting */
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+
+    "paths": {
+      "@database/*": ["./frontend/core/database/*"],
+      "@automation/*": ["./frontend/core/automation/*"],
+      "@logging/*": ["./frontend/core/logging/*"],
+      "@refinery/*": ["./frontend/core/refinery/*"],
+      "@llm/*": ["./frontend/core/llm/*"],
+      "@retrieval/*": ["./frontend/core/retrieval/*"],
+      "@test/*": ["./frontend/test/*"],
+      "@utils/*": ["./frontend/utils/*"],
+      "@settings": ["./frontend/settings.ts"],
+      "@ai/*": ["./frontend/core/ai/*"],
+      "@translation/*": ["./frontend/core/translation/*"],
+      "@filesearch/*": ["./frontend/core/filesearch/*"]
+    },
+    "types": ["node"]
   },
-  "include": ["src"],
+  "include": ["frontend", "frontend/**/*.ts", "frontend/**/*.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
