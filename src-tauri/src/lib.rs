@@ -4,6 +4,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 mod commands;
 mod error;
+pub mod chunker;
 pub mod schema;
 
 pub use error::AppError;
@@ -20,6 +21,12 @@ pub use error::AppError;
 pub struct DbState {
     pub pool: RwLock<Option<Pool<SqliteConnectionManager>>>,
     pub write_lock: Mutex<()>,
+}
+
+impl Default for DbState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DbState {
@@ -132,9 +139,6 @@ pub fn run() {
             commands::cards::cards_insert_ignore,
             commands::cards::cards_review_fsrs,
         ])
-        .run({
-            let context = tauri::generate_context!();
-            context
-        })
+        .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
