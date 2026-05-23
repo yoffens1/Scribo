@@ -1,4 +1,8 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+static RE_CHARS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[|\s\-:]+$").unwrap());
+static RE_HYPHENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":?-{3,}:?").unwrap());
 
 fn parse_table_row(row: &str) -> Vec<String> {
     let mut cleaned = row.trim();
@@ -12,10 +16,21 @@ fn parse_table_row(row: &str) -> Vec<String> {
 }
 
 fn is_separator_row(row: &str) -> bool {
-    let trimmed = row.trim();
-    let re_chars = Regex::new(r"^[|\s\-:]+$").unwrap();
-    let re_hyphens = Regex::new(r":?-{3,}:?").unwrap();
-    re_chars.is_match(trimmed) && re_hyphens.is_match(trimmed)
+    let row_trim = row.trim();
+    if !row_trim.starts_with('|') || !row_trim.ends_with('|') {
+        return false;
+    }
+    
+    if !RE_CHARS.is_match(row_trim) {
+        return false;
+    }
+    
+    let parts: Vec<&str> = row_trim.split('|').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return false;
+    }
+    
+    parts.iter().all(|p| RE_HYPHENS.is_match(p.trim()))
 }
 
 pub fn linearize_table(table_text: &str) -> Vec<String> {

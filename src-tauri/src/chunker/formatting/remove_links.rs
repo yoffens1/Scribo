@@ -1,17 +1,21 @@
+use std::sync::LazyLock;
 use regex::Regex;
+use std::borrow::Cow;
 
-pub fn remove_markdown_links(text: &str) -> String {
-    let re_wiki = Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap();
-    let mut cleaned = re_wiki.replace_all(text, |caps: &regex::Captures| {
-        if let Some(display) = caps.get(2) {
-            display.as_str().to_string()
+static RE_WIKI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap());
+static RE_MD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\([^\)]+\)").unwrap());
+
+pub fn remove_links(text: &str) -> Cow<'_, str> {
+    let mut cleaned = RE_WIKI.replace_all(text, |caps: &regex::Captures| {
+        if let Some(alias) = caps.get(2) {
+            alias.as_str().to_string()
         } else {
             caps.get(1).unwrap().as_str().to_string()
         }
-    }).to_string();
-    
-    let re_md = Regex::new(r"\[([^\]]+)\]\([^\)]+\)").unwrap();
-    cleaned = re_md.replace_all(&cleaned, "$1").to_string();
-    
+    });
+
+    if let Cow::Owned(s) = RE_MD.replace_all(&cleaned, "$1") {
+        cleaned = Cow::Owned(s);
+    }
     cleaned
 }

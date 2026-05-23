@@ -4,8 +4,9 @@ import { LogScope } from "../types/refinery-stage";
 import type { RefineryStage } from "../types/refinery-stage";
 import type { RefineryContext } from "../types/refinery-context";
 import type { ChunkWithHash } from "../types/chunk-decision";
-import { Chunker } from "@utils/chunker/Chunker";
+
 import { HashService } from "@database/services/indexing/HashService";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * Stage 1: Read a raw .md file from inbox and produce twin chunks.
@@ -33,7 +34,11 @@ export class ChunkingStage implements RefineryStage<string, ChunkWithHash[]> {
     ctx.logger.log("info", LogScope.CHUNKING_READ, fullPath);
 
     const content = await ctx.fileAccess.readText(fullPath);
-    const { pairs, metadata } = this.chunker.chunkPaired(content);
+    // Use the blazing fast Rust chunker backend!
+    const { pairs, metadata } = await invoke<{
+      pairs: Array<{ embedding: string; generation: string }>;
+      metadata: Record<string, any> | null;
+    }>("chunk_text_paired", { content });
 
     const result: ChunkWithHash[] = [];
 

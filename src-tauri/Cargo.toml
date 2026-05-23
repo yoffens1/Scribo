@@ -42,6 +42,16 @@ fsrs = "5.2.0"
 bytemuck = "1.25.0"
 dirs = "6.0.0"
 pulldown-cmark = "0.13.4"
-tiktoken-rs = "0.11.0"
 regex = "1.12.3"
 walkdir = "2.5.0"
+serde_yaml = "0.9.34"
+pulldown-cmark-to-cmark = "22.0.0"
+rayon = "1.12.0"
+
+[dev-dependencies]
+proptest = "1.11.0"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "chunker_bench"
+harness = false

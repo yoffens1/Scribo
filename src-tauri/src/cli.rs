@@ -54,7 +54,7 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let mut imported = 0;
             
-            let chunker = scribo_lib::chunker::Chunker::new(scribo_lib::chunker::ChunkOptions::default());
+            
 
             for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -62,7 +62,7 @@ pub fn handle_cli(args: Vec<String>) {
                     let title = path.file_name().unwrap().to_str().unwrap().to_string();
                     let content = std::fs::read_to_string(path).unwrap_or_default();
                         
-                        let chunked_result = chunker.chunk_paired(content);
+                        let chunked_result = scribo_lib::chunker::chunk_paired(content, &scribo_lib::chunker::ChunkOptions::default());
                         
                         let file_path_str = path.to_str().unwrap().to_string();
                         let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -103,8 +103,8 @@ pub fn handle_cli(args: Vec<String>) {
         "chunk-file" => {
             let file_path = args.get(2).expect("Missing file path");
             let content = std::fs::read_to_string(file_path).expect("Could not read file");
-            let chunker = scribo_lib::chunker::Chunker::new(scribo_lib::chunker::ChunkOptions::default());
-            let result = chunker.chunk_paired(content);
+            
+            let result = scribo_lib::chunker::chunk_paired(content, &scribo_lib::chunker::ChunkOptions::default());
             
             println!("File: {}", file_path);
             println!("Total Chunks: {}", result.pairs.len());

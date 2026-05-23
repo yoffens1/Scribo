@@ -138,6 +138,8 @@ pub fn run() {
             commands::chunks::chunks_vector_search,
             commands::cards::cards_insert_ignore,
             commands::cards::cards_review_fsrs,
+            commands::chunker::chunk_text_paired,
+            commands::chunker::count_text_tokens,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

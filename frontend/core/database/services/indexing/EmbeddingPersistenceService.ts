@@ -4,7 +4,7 @@ import { FileRepository } from "../../repositories/FileRepository";
 import { ChunkRepository } from "../../repositories/ChunkRepository";
 import { MaintenanceService } from "../MaintenanceService";
 import { Embedder } from "@ai/embedding/Embedder";
-import { countTokens } from "@utils/chunker/token";
+import { invoke } from "@tauri-apps/api/core";
 import { MAX_CHUNKS_PER_FILE } from "../../models/constants";
 import {
   DbEventBus,
@@ -66,12 +66,14 @@ export class EmbeddingPersistenceService {
         );
       }
 
-      const rows = chunked.map((c, i) => ({
-        chunkIndex: i,
-        text: c.text,
-        tokens: countTokens(c.text),
-        embedding: new Uint8Array(c.embedding.buffer, c.embedding.byteOffset, c.embedding.byteLength),
-      }));
+      const rows = await Promise.all(
+        chunked.map(async (c, i) => ({
+          chunkIndex: i,
+          text: c.text,
+          tokens: await invoke<number>("count_text_tokens", { text: c.text }),
+          embedding: new Uint8Array(c.embedding.buffer, c.embedding.byteOffset, c.embedding.byteLength),
+        }))
+      );
 
       // Phase 2: DB writes only — now async via Tauri.
       await this.core.withTransaction(async () => {

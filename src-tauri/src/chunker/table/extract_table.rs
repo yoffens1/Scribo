@@ -1,14 +1,15 @@
 use regex::Regex;
 use crate::chunker::types::TableInfo;
 use crate::chunker::token::count_tokens;
+use std::sync::LazyLock;
+
+static RE_SEP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\|[-:\s]*---").unwrap());
 
 pub fn extract_tables(text: &str) -> (String, Vec<TableInfo>) {
     let mut tables = Vec::new();
     let lines: Vec<&str> = text.split('\n').collect();
     let mut new_lines = Vec::new();
     let mut i = 0;
-
-    let re_sep = Regex::new(r"\|[-:\s]*---").unwrap();
 
     while i < lines.len() {
         let line = lines[i];
@@ -22,7 +23,7 @@ pub fn extract_tables(text: &str) -> (String, Vec<TableInfo>) {
                 j += 1;
             }
 
-            let has_separator = table_lines.iter().any(|l| re_sep.is_match(l));
+            let has_separator = table_lines.iter().any(|l| RE_SEP.is_match(l));
             if has_separator {
                 let placeholder = format!("{{{{TABLE_{}}}}}", tables.len());
                 let table_content = table_lines.join("\n");

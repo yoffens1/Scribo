@@ -1,6 +1,9 @@
+use std::sync::LazyLock;
 use regex::Regex;
+use std::borrow::Cow;
 
-pub fn remove_list_numbering(text: &str) -> String {
-    let re = Regex::new(r"(?m)^[\s]*\d+\.\s+").unwrap();
-    re.replace_all(text, "").to_string()
+static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^[\s]*\d+\.\s+").unwrap());
+
+pub fn remove_list_numbering(text: &str) -> Cow<'_, str> {
+    RE.replace_all(text, "")
 }
