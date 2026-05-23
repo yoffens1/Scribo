@@ -1,0 +1,82 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use crate::ai::LlmConfig;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineConfig {
+    pub auto_translate: Option<bool>,
+    pub expand_synonyms: Option<String>, // "off", "static", "llm"
+    pub synonym_dict: Option<HashMap<String, Vec<String>>>,
+    pub hyde: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRerankConfig {
+    pub enabled: bool,
+    pub mode: Option<String>, // "scoring", "listwise"
+    pub max_candidates: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalConfig {
+    pub mode: String, // "embedding", "keyword", "hybrid"
+    pub embedding_weight: Option<f32>,
+    pub pipeline: Option<PipelineConfig>,
+    pub ai_rerank: Option<AiRerankConfig>,
+    pub vault_lang: Option<String>,
+    pub llm_config: Option<LlmConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkRef {
+    pub file_path: String,
+    pub chunk_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub chunk_ref: ChunkRef,
+    pub score: f32,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrieveFilters {
+    pub file_path: Option<String>,
+    pub folder: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrieveOptions {
+    pub top_k: Option<usize>,
+    pub filters: Option<RetrieveFilters>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchQuery {
+    pub file_path: Option<String>,
+    pub file_name: Option<String>,
+    pub include_deleted: Option<bool>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchResult {
+    pub chunk_id: Option<i64>,
+    pub file_path: String,
+    pub chunk_index: usize,
+    pub chunk_text: Option<String>,
+    pub token_count: Option<i64>,
+    #[serde(with = "serde_bytes")]
+    pub embedding: Vec<u8>,
+}

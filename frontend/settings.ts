@@ -1,6 +1,12 @@
 // src/settings.ts
-import { LLMConfig } from "@ai/types";
 import { sanitizeFileName } from "@utils/sanitizeFileName";
+
+export interface LLMConfig {
+  backend: string;
+  model: string;
+  baseUrl?: string;
+  temperature?: number;
+}
 
 /** Конфигурация переводчика */
 export const TRANSLATOR_CONFIG = {
@@ -73,32 +79,3 @@ export const LLM_DEFAULTS = {
     openrouter: "https://openrouter.ai/api/v1",
   } as Record<string, string>,
 } as const;
-
-// ── Retrieval config builder ──
-
-import type { RetrievalConfig } from "@retrieval/retrievers/types";
-
-/**
- * Build RetrievalConfig from user-facing settings.
- *
- * In the Obsidian plugin, this would be called from the settings tab
- * onChange handler. For the CLI, call it directly with your desired opts.
- *
- * UI mapping (not yet implemented — platform-dependent):
- *   - Checkbox: "AI Rerank" → aiRerank.enabled
- *   - Dropdown: "Rerank mode" → aiRerank.mode ("scoring" | "listwise")
- *   - Slider:  "Max candidates" → aiRerank.maxCandidates (10-50, default 25)
- */
-export function buildRetrievalConfig(opts: {
-  mode?: RetrievalConfig["mode"];
-  embeddingWeight?: number;
-  pipeline?: RetrievalConfig["pipeline"];
-  aiRerank?: RetrievalConfig["aiRerank"];
-}): RetrievalConfig {
-  return {
-    mode: opts.mode ?? "hybrid",
-    embeddingWeight: opts.embeddingWeight,
-    pipeline: opts.pipeline,
-    aiRerank: opts.aiRerank,
-  };
-}

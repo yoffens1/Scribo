@@ -1,1 +1,0 @@
-{"roots":[{"name":"ai","description":"AI and ML topics","children":[],"assignedChunks":["h1","h2"]},{"name":"programming","description":"Programming topics","children":[{"name":"rust","description":"Rust language","children":[],"assignedChunks":["h3"]}],"assignedChunks":[]}],"rationale":"Grouped by topic area"}

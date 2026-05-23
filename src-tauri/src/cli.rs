@@ -3,6 +3,13 @@ use std::path::PathBuf;
 use rusqlite::Connection;
 
 fn get_db_path() -> PathBuf {
+    if let Some(mut path) = dirs::data_dir() {
+        path.push("scribo");
+        path.push("scribo_core.db");
+        if path.exists() {
+            return path;
+        }
+    }
     // Для удобства разработки создаем базу прямо в текущей директории репозитория
     let mut path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     path.push("scribo_core.db");
@@ -14,7 +21,7 @@ pub fn handle_cli(args: Vec<String>) {
     let mut conn = Connection::open(&db_path).expect("Failed to open database");
 
     // Ensure the database is initialized before CLI actions
-    if let Err(e) = scribo_lib::schema::initialize_schema(&mut conn) {
+    if let Err(e) = scribo_lib::db::schema::initialize_schema(&mut conn) {
         eprintln!("Warning: Failed to initialize schema: {}", e);
     }
 
@@ -54,7 +61,7 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let mut imported = 0;
             
-            
+            let tx = conn.transaction().unwrap();
 
             for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -67,28 +74,28 @@ pub fn handle_cli(args: Vec<String>) {
                         let file_path_str = path.to_str().unwrap().to_string();
                         let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                         
-                        conn.execute(
+                        tx.execute(
                             "INSERT OR IGNORE INTO files (file_path, file_name, status, updated_at) VALUES (?1, ?2, 'indexed', ?3)",
                             (&file_path_str, &title, timestamp),
                         ).unwrap();
                         
-                        let file_id: i64 = conn.query_row(
+                        let file_id: i64 = tx.query_row(
                             "SELECT file_id FROM files WHERE file_path = ?1",
                             (&file_path_str,),
                             |row| row.get(0)
                         ).unwrap();
                         
-                        conn.execute("DELETE FROM chunks WHERE file_id = ?1", (file_id,)).unwrap();
+                        tx.execute("DELETE FROM chunks WHERE file_id = ?1", (file_id,)).unwrap();
                         
                         // Insert proper chunks
                         for (i, pair) in chunked_result.pairs.iter().enumerate() {
-                            conn.execute(
+                            tx.execute(
                                 "INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, X'00')",
                                 (file_id, i as i64, &pair.generation),
                             ).unwrap();
                         }
                         
-                        conn.execute(
+                        tx.execute(
                             "INSERT OR IGNORE INTO cards (file_id, state, reps, lapses, stability, difficulty)
                              VALUES (?, 'new', 0, 0, 0.0, 0.0)",
                             (file_id,),
@@ -98,6 +105,7 @@ pub fn handle_cli(args: Vec<String>) {
                         imported += 1;
                 }
             }
+            tx.commit().unwrap();
             println!("Successfully imported {} markdown files.", imported);
         }
         "chunk-file" => {

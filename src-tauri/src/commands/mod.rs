@@ -1,8 +1,9 @@
 pub mod cards;
-pub mod chunks;
 pub mod chunker;
+pub mod chunks;
 pub mod db;
 pub mod files;
-
-#[cfg(test)]
 pub mod tests;
+pub mod ai;
+pub mod refinery;
+pub mod search;
