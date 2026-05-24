@@ -1,17 +1,10 @@
-pub mod sections;
-pub mod assemble;
-pub mod tables;
-pub mod sub_headings;
-pub mod clean;
-pub mod headings;
-
 use rayon::prelude::*;
-use crate::chunker::extract;
+use crate::chunker::stages::extract;
 use crate::chunker::types::{ChunkOptions, ChunkerPair, ChunkerResult, ChunkMode};
 
-use sections::chunk_by_heading_sections;
-use sections::process_section;
-use clean::clean_chunk;
+use super::stages::sections::chunk_by_heading_sections;
+use super::stages::sections::process_section;
+use super::stages::clean::clean_chunk;
 
 pub fn run_pipeline(
     content: &str,

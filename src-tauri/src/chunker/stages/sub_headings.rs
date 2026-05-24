@@ -1,5 +1,5 @@
 use std::sync::LazyLock;
-use crate::chunker::extract;
+use crate::chunker::stages::extract;
 
 static RE_SUB_LEVELS: LazyLock<[regex::Regex; 6]> = LazyLock::new(|| [
     regex::Regex::new(r"(?m)^#{1,6}\s").unwrap(),

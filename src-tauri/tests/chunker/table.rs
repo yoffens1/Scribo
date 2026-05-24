@@ -1,4 +1,4 @@
-use scribo_lib::chunker::table::*;
+use scribo_lib::chunker::stages::table::*;
 
 #[test]
 fn test_extract_tables_valid() {

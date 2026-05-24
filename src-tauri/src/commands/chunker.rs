@@ -8,5 +8,5 @@ pub fn chunk_text_paired(content: String) -> Result<ChunkerResult, AppError> {
 
 #[tauri::command]
 pub fn count_text_tokens(text: String) -> usize {
-    crate::chunker::token::count_tokens(&text)
+    crate::chunker::stages::token::count_tokens(&text)
 }

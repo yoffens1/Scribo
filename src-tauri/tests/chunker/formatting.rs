@@ -1,4 +1,4 @@
-use scribo_lib::chunker::formatting::*;
+use scribo_lib::chunker::stages::formatting::*;
 
 #[test]
 fn test_remove_empty_lines() {

@@ -1,5 +1,5 @@
-use scribo_lib::chunker::pipeline::assemble::{glue_subheadings_to_content, assemble_raw_chunks};
-use scribo_lib::chunker::pipeline::tables::restore_tables;
+use scribo_lib::chunker::stages::assemble::{glue_subheadings_to_content, assemble_raw_chunks};
+use scribo_lib::chunker::stages::table_restore::restore_tables;
 use scribo_lib::chunker::{chunk_for_embedding, chunk_for_generation, chunk_paired, ChunkOptions, TableInfo};
 use crate::types::validate_config_invariants;
 

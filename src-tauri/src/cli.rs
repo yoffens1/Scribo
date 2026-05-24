@@ -126,7 +126,7 @@ pub fn handle_cli(args: Vec<String>) {
                     println!("Total Chunks (Embedding): {}", chunks.len());
                     for (i, chunk) in chunks.iter().enumerate() {
                         println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(chunk));
+                        println!("[Tokens: {}]", scribo_lib::chunker::stages::token::count_tokens(chunk));
                         println!("{}", chunk);
                     }
                 }
@@ -135,7 +135,7 @@ pub fn handle_cli(args: Vec<String>) {
                     println!("Total Chunks (Generation): {}", chunks.len());
                     for (i, chunk) in chunks.iter().enumerate() {
                         println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(chunk));
+                        println!("[Tokens: {}]", scribo_lib::chunker::stages::token::count_tokens(chunk));
                         println!("{}", chunk);
                     }
                 }
@@ -145,7 +145,7 @@ pub fn handle_cli(args: Vec<String>) {
                     println!("Total Chunks (Structural): {}", result.pairs.len());
                     for (i, pair) in result.pairs.iter().enumerate() {
                         println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(&pair.embedding));
+                        println!("[Tokens: {}]", scribo_lib::chunker::stages::token::count_tokens(&pair.embedding));
                         println!("{}", pair.embedding);
                     }
                 }
@@ -154,7 +154,7 @@ pub fn handle_cli(args: Vec<String>) {
                     println!("Total Chunks (Paired): {}", result.pairs.len());
                     for (i, pair) in result.pairs.iter().enumerate() {
                         println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(&pair.generation));
+                        println!("[Tokens: {}]", scribo_lib::chunker::stages::token::count_tokens(&pair.generation));
                         println!("[Embedding]:\n{}\n", pair.embedding);
                         println!("[Generation]:\n{}", pair.generation);
                     }

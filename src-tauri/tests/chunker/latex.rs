@@ -1,4 +1,4 @@
-use scribo_lib::chunker::latex::*;
+use scribo_lib::chunker::stages::latex::*;
 
 #[test]
 fn test_format_latex_symbols() {

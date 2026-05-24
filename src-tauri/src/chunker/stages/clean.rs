@@ -1,6 +1,6 @@
 use crate::chunker::types::ChunkOptions;
-use crate::chunker::formatting;
-use crate::chunker::latex;
+use crate::chunker::stages::formatting;
+use crate::chunker::stages::latex;
 
 pub fn clean_chunk(chunk: &str, options: &ChunkOptions) -> String {
     type Transform = fn(&str) -> std::borrow::Cow<'_, str>;

@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 use crate::chunker::types;
 use crate::chunker::types::ChunkOptions;
-use crate::chunker::table;
+use crate::chunker::stages::table;
 use super::clean::clean_chunk;
 use super::assemble::assemble_raw_chunks;
 

@@ -1,4 +1,4 @@
-use scribo_lib::chunker::extract::{extract_yaml_frontmatter, split_by_headings};
+use scribo_lib::chunker::stages::extract::{extract_yaml_frontmatter, split_by_headings};
 
 #[test]
 fn test_extract_yaml_frontmatter_valid() {

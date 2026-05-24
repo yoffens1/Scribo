@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 use crate::chunker::types::ChunkOptions;
-use crate::chunker::token;
+use crate::chunker::stages::token;
 
 static RE_SUBHEADING: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^#{1,6}\s").unwrap());
 

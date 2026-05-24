@@ -1,11 +1,11 @@
 use std::sync::LazyLock;
 use rayon::prelude::*;
-use crate::chunker::extract;
+use crate::chunker::stages::extract;
 use crate::chunker::types::ChunkOptions;
-use crate::chunker::table;
-use crate::chunker::token;
+use crate::chunker::stages::table;
+use crate::chunker::stages::token;
 use super::assemble::{glue_subheadings_to_content, assemble_raw_chunks};
-use super::tables::{restore_tables, linearize_table_chunks};
+use super::table_restore::{restore_tables, linearize_table_chunks};
 use super::sub_headings::split_chunks_by_sub_headings;
 use super::clean::clean_chunk;
 use super::headings::prepend_heading_to_chunks;
