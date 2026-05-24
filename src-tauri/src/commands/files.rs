@@ -1,15 +1,14 @@
 use tauri::State;
 use crate::DbState;
 use crate::error::AppError;
-use crate::db::repos::files::{
-    self, FileRecord, UpsertIndexingParams, InsertFailedParams, FileQueryRecord
-};
+use crate::db::repos::files;
+use crate::domain::file::{FileRef, UpsertIndexingParams, InsertFailedParams, FileQueryRecord};
 
 #[tauri::command]
 pub fn files_get_by_path(
     state: State<'_, DbState>,
     path: String,
-) -> Result<Option<FileRecord>, AppError> {
+) -> Result<Option<FileRef>, AppError> {
     state.with_conn(|conn| files::get_by_path(conn, &path))
 }
 

@@ -1,22 +1,12 @@
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
 use fsrs::{FSRS, MemoryState};
 use crate::error::AppError;
+use crate::domain::card::{CardReviewParams, ReviewResult};
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct CardReviewParams {
-    pub card_id: i64,
-    pub rating: u32,
-}
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewResult {
-    pub scheduled_days: f32,
-    pub next_review: i64,
-}
+
+
 
 pub fn insert_ignore(conn: &Connection, file_id: i64) -> Result<(), AppError> {
     conn.execute(

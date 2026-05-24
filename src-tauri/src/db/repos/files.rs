@@ -1,6 +1,6 @@
 use rusqlite::{Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
 use crate::error::AppError;
+use crate::domain::file::{FileRef, UpsertIndexingParams, InsertFailedParams, FileQueryRecord};
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -9,25 +9,16 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FileRecord {
-    pub file_id: i64,
-    pub file_hash: Option<String>,
-    pub is_deleted: Option<i64>,
-    pub embedding_model: Option<String>,
-    pub chunking_version: Option<String>,
-    pub file_mtime: Option<i64>,
-}
 
-pub fn get_by_path(conn: &Connection, path: &str) -> Result<Option<FileRecord>, AppError> {
+
+pub fn get_by_path(conn: &Connection, path: &str) -> Result<Option<FileRef>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT file_id, file_hash, is_deleted, embedding_model, chunking_version, file_mtime
          FROM files WHERE file_path = ?",
     )?;
     let record = stmt
         .query_row([path], |row| {
-            Ok(FileRecord {
+            Ok(FileRef {
                 file_id: row.get(0)?,
                 file_hash: row.get(1)?,
                 is_deleted: row.get(2)?,
@@ -40,18 +31,7 @@ pub fn get_by_path(conn: &Connection, path: &str) -> Result<Option<FileRecord>, 
     Ok(record)
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct UpsertIndexingParams {
-    pub clean_path: String,
-    pub file_name: String,
-    pub file_hash: String,
-    pub file_mtime: Option<i64>,
-    pub embedding_model: String,
-    pub embedding_dim: i64,
-    pub chunking_version: String,
-    pub updated_at: i64,
-}
+
 
 pub fn upsert_indexing(conn: &mut Connection, params: UpsertIndexingParams) -> Result<i64, AppError> {
     let file_id: i64 = conn.query_row(
@@ -107,16 +87,7 @@ pub fn mark_failed(conn: &Connection, path: &str, error: &str) -> Result<(), App
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct InsertFailedParams {
-    pub clean_path: String,
-    pub file_name: String,
-    pub file_hash: String,
-    pub file_mtime: Option<i64>,
-    pub error: String,
-    pub updated_at: i64,
-}
+
 
 pub fn insert_failed(conn: &Connection, params: InsertFailedParams) -> Result<(), AppError> {
     conn.execute(
@@ -183,16 +154,7 @@ pub fn hard_delete(conn: &Connection, path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FileQueryRecord {
-    pub file_id: i64,
-    pub file_path: String,
-    pub is_deleted: i64,
-    pub file_mtime: Option<i64>,
-    pub embedding_model: Option<String>,
-    pub chunking_version: Option<String>,
-}
+
 
 pub fn get_all(conn: &Connection) -> Result<Vec<FileQueryRecord>, AppError> {
     let mut stmt = conn.prepare(

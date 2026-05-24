@@ -1,9 +1,8 @@
 use tauri::State;
 use crate::DbState;
 use crate::error::AppError;
-use crate::db::repos::chunks::{
-    self, ChunkInsertRow, FullChunkRecord, SearchHit, VectorSearchHit
-};
+use crate::db::repos::chunks;
+use crate::domain::chunk::{ChunkInsertRow, Chunk, SearchHit, VectorSearchHit};
 
 #[tauri::command]
 pub fn chunks_delete_by_file_id(
@@ -36,7 +35,7 @@ pub fn chunks_get_by_file_path(
     state: State<'_, DbState>,
     file_path: String,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     state.with_conn(|conn| chunks::get_by_file_path(conn, &file_path, include_deleted))
 }
 
@@ -44,7 +43,7 @@ pub fn chunks_get_by_file_path(
 pub fn chunks_get_all(
     state: State<'_, DbState>,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     state.with_conn(|conn| chunks::get_all(conn, include_deleted))
 }
 
@@ -53,7 +52,7 @@ pub fn chunks_get_by_file_name(
     state: State<'_, DbState>,
     name: String,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     state.with_conn(|conn| chunks::get_by_file_name(conn, &name, include_deleted))
 }
 

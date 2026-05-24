@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use scribo_lib::db::schema::initialize_schema;
-    use scribo_lib::db::repos::cards::{review_fsrs, CardReviewParams};
+    use scribo_lib::db::repos::cards::review_fsrs;
+    use scribo_lib::domain::card::CardReviewParams;
     use scribo_lib::db::repos::files::update_content_with_diff;
     use scribo_lib::retrieval::{retrieve, fetch, RetrievalConfig, RetrieveOptions, FetchQuery};
     use scribo_lib::DbState;

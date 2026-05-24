@@ -1,16 +1,8 @@
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use crate::error::AppError;
+use crate::domain::chunk::{Chunk, ChunkInsertRow, SearchHit, VectorSearchHit};
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ChunkInsertRow {
-    pub chunk_index: i64,
-    pub text: String,
-    pub tokens: i64,
-    #[serde(with = "serde_bytes")]
-    pub embedding: Vec<u8>,
-}
+
 
 pub fn delete_by_file_id(conn: &Connection, file_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
@@ -41,23 +33,13 @@ pub fn insert(conn: &mut Connection, file_id: i64, rows: Vec<ChunkInsertRow>) ->
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FullChunkRecord {
-    pub chunk_id: i64,
-    pub file_path: String,
-    pub chunk_index: i64,
-    pub chunk_text: Option<String>,
-    pub token_count: Option<i64>,
-    #[serde(with = "serde_bytes")]
-    pub embedding: Vec<u8>,
-}
+
 
 fn fetch_chunks(
     conn: &Connection,
     extra_where: &str,
     params: &[&dyn rusqlite::types::ToSql],
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     let base = "SELECT c.chunk_id, f.file_path, c.chunk_index, c.chunk_text, c.token_count, c.embedding
                 FROM chunks c
                 JOIN files f ON f.file_id = c.file_id";
@@ -69,7 +51,7 @@ fn fetch_chunks(
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params, |row| {
-        Ok(FullChunkRecord {
+        Ok(Chunk {
             chunk_id: row.get(0)?,
             file_path: row.get(1)?,
             chunk_index: row.get(2)?,
@@ -85,7 +67,7 @@ pub fn get_by_file_path(
     conn: &Connection,
     file_path: &str,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     let clause = if include_deleted {
         "f.file_path = ?"
     } else {
@@ -97,7 +79,7 @@ pub fn get_by_file_path(
 pub fn get_all(
     conn: &Connection,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     let clause = if include_deleted { "" } else { "f.is_deleted = 0" };
     fetch_chunks(conn, clause, &[])
 }
@@ -106,7 +88,7 @@ pub fn get_by_file_name(
     conn: &Connection,
     name: &str,
     include_deleted: bool,
-) -> Result<Vec<FullChunkRecord>, AppError> {
+) -> Result<Vec<Chunk>, AppError> {
     let clause = if include_deleted {
         "f.file_name = ?"
     } else {
@@ -115,15 +97,7 @@ pub fn get_by_file_name(
     fetch_chunks(conn, clause, &[&name])
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchHit {
-    pub chunk_id: i64,
-    pub file_path: String,
-    pub chunk_index: i64,
-    pub snippet: String,
-    pub score: f64,
-}
+
 
 pub fn search(
     conn: &Connection,
@@ -178,15 +152,7 @@ fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct VectorSearchHit {
-    pub chunk_id: i64,
-    pub file_path: String,
-    pub chunk_index: i64,
-    pub chunk_text: Option<String>,
-    pub similarity: f32,
-}
+
 
 #[derive(Debug)]
 struct HitRecord {

@@ -1,7 +1,8 @@
 use tauri::State;
 use crate::DbState;
 use crate::error::AppError;
-use crate::db::repos::cards::{self, CardReviewParams, ReviewResult};
+use crate::db::repos::cards;
+use crate::domain::card::{CardReviewParams, ReviewResult};
 
 #[tauri::command]
 pub fn cards_insert_ignore(state: State<'_, DbState>, file_id: i64) -> Result<(), AppError> {
