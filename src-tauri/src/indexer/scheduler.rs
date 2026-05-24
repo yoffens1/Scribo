@@ -42,9 +42,9 @@ impl ReindexScheduler {
                         let pool_guard = pool_clone.read();
                         if let Some(ref p) = *pool_guard {
                             if let Ok(mut conn) = p.get() {
-                                let hash = crate::db::compute_file_hash(&content);
+                                let hash = crate::indexer::compute_file_hash(&content);
                                 
-                                let validation = crate::db::check_needs_indexing(
+                                let validation = crate::indexer::check_needs_indexing(
                                     &conn,
                                     &file_path,
                                     &hash,
@@ -61,7 +61,7 @@ impl ReindexScheduler {
                                             .and_then(|n| n.to_str())
                                             .unwrap_or("unknown");
                                             
-                                        let payload = crate::db::IndexingPayload {
+                                        let payload = crate::indexer::IndexingPayload {
                                             file_path: &file_path,
                                             file_name,
                                             file_hash: &hash,
@@ -72,7 +72,7 @@ impl ReindexScheduler {
                                             chunks: vec![], // TODO: generate via chunker and LLM
                                         };
                                         
-                                        if let Err(e) = crate::db::persist_indexed_file(&mut conn, payload) {
+                                        if let Err(e) = crate::indexer::persist_indexed_file(&mut conn, payload) {
                                             eprintln!("Failed to persist indexed file {}: {}", file_path, e);
                                         }
                                     } else {

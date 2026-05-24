@@ -1,5 +1,5 @@
 use crate::refinery::types::AtomChunk;
-use crate::db::hash::compute_file_hash;
+use crate::indexer::hash::compute_file_hash;
 use crate::chunker::{chunk_paired, ChunkOptions};
 
 pub async fn run_chunking_stage(content: &str, source_path: &str) -> Vec<AtomChunk> {

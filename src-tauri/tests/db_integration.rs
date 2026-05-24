@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::schema::initialize_schema;
-    use crate::db::repos::cards::{review_fsrs, CardReviewParams};
-    use crate::db::repos::files::update_content_with_diff;
-    use crate::retrieval::{retrieve, fetch, RetrievalConfig, RetrieveOptions, FetchQuery};
-    use crate::DbState;
+    use scribo_lib::db::schema::initialize_schema;
+    use scribo_lib::db::repos::cards::{review_fsrs, CardReviewParams};
+    use scribo_lib::db::repos::files::update_content_with_diff;
+    use scribo_lib::retrieval::{retrieve, fetch, RetrievalConfig, RetrieveOptions, FetchQuery};
+    use scribo_lib::DbState;
     use parking_lot::{Mutex, RwLock};
     use r2d2::Pool;
     use r2d2_sqlite::SqliteConnectionManager;
