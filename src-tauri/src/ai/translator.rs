@@ -1,4 +1,5 @@
 use crate::ai::{LlmService, Message};
+use super::prompts::translation;
 use std::sync::Arc;
 
 pub struct Translator {
@@ -13,11 +14,11 @@ impl Translator {
     pub async fn translate(&self, text: &str, target_lang: &str) -> Result<String, String> {
         let messages = vec![
             Message {
-                role: "system".to_string(),
-                content: format!("You are a professional translator. Translate the following text into {} preserving markdown formatting, tone, and specific terminology.", target_lang),
+                role: "system".into(),
+                content: translation::system_prompt(target_lang),
             },
             Message {
-                role: "user".to_string(),
+                role: "user".into(),
                 content: text.to_string(),
             },
         ];

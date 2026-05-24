@@ -1,5 +1,13 @@
 use crate::ai::types::Message;
 
+pub fn system_prompt(target_lang: &str) -> String {
+    format!(
+        "You are a professional translator. Translate the following text into {} \
+         preserving markdown formatting, tone, and specific terminology.",
+        target_lang
+    )
+}
+
 pub fn build_translate_prompt(text: &str, tgt: &str) -> Vec<Message> {
     vec![
         Message {
