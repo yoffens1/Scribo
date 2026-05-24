@@ -109,18 +109,56 @@ pub fn handle_cli(args: Vec<String>) {
             println!("Successfully imported {} markdown files.", imported);
         }
         "chunk-file" => {
-            let file_path = args.get(2).expect("Missing file path");
+            if args.len() < 3 {
+                println!("Usage: scribo chunk-file <file_path> [--embedding|--generation|--structural|--paired]");
+                return;
+            }
+            let file_path = &args[2];
+            let mode = args.get(3).map(|s| s.as_str()).unwrap_or("--paired");
             let content = std::fs::read_to_string(file_path).expect("Could not read file");
-            
-            let result = scribo_lib::chunker::chunk_paired(content, &scribo_lib::chunker::ChunkOptions::default());
+            let default_opts = scribo_lib::chunker::ChunkOptions::default();
             
             println!("File: {}", file_path);
-            println!("Total Chunks: {}", result.pairs.len());
-            for (i, pair) in result.pairs.iter().enumerate() {
-                println!("\n================ CHUNK {} ================", i);
-                println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(&pair.generation));
-                println!("[Embedding]:\n{}\n", pair.embedding);
-                println!("[Generation]:\n{}", pair.generation);
+            
+            match mode {
+                "--embedding" => {
+                    let chunks = scribo_lib::chunker::chunk_for_embedding(&content, &default_opts);
+                    println!("Total Chunks (Embedding): {}", chunks.len());
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        println!("\n================ CHUNK {} ================", i);
+                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(chunk));
+                        println!("{}", chunk);
+                    }
+                }
+                "--generation" => {
+                    let chunks = scribo_lib::chunker::chunk_for_generation(&content, &default_opts);
+                    println!("Total Chunks (Generation): {}", chunks.len());
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        println!("\n================ CHUNK {} ================", i);
+                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(chunk));
+                        println!("{}", chunk);
+                    }
+                }
+                "--structural" => {
+                    let struct_opts = default_opts.for_mode(scribo_lib::chunker::ChunkMode::Structural);
+                    let result = scribo_lib::chunker::chunk_paired(content, &struct_opts);
+                    println!("Total Chunks (Structural): {}", result.pairs.len());
+                    for (i, pair) in result.pairs.iter().enumerate() {
+                        println!("\n================ CHUNK {} ================", i);
+                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(&pair.embedding));
+                        println!("{}", pair.embedding);
+                    }
+                }
+                _ => { // --paired
+                    let result = scribo_lib::chunker::chunk_paired(content, &default_opts);
+                    println!("Total Chunks (Paired): {}", result.pairs.len());
+                    for (i, pair) in result.pairs.iter().enumerate() {
+                        println!("\n================ CHUNK {} ================", i);
+                        println!("[Tokens: {}]", scribo_lib::chunker::token::count_tokens(&pair.generation));
+                        println!("[Embedding]:\n{}\n", pair.embedding);
+                        println!("[Generation]:\n{}", pair.generation);
+                    }
+                }
             }
         }
         "list" => {

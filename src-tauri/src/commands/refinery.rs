@@ -11,7 +11,7 @@ pub async fn refinery_run_pipeline(
     content: String,
     llm_config: LlmConfig,
 ) -> Result<PlacementPlan, AppError> {
-    let llm_service = Arc::new(LlmService::new(llm_config));
+    let llm_service = Arc::new(LlmService::new(llm_config, None));
     let pipeline = RefineryPipeline::new(llm_service);
     
     pipeline.refine(&source_path, &content, &state).await.map_err(|e| AppError::Other(e))

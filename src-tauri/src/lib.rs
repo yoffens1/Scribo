@@ -59,6 +59,8 @@ pub fn run() {
             commands::chunker::count_text_tokens,
             commands::ai::ai_generate,
             commands::ai::ai_generate_embeddings,
+            commands::ai::ai_list_local_models,
+            commands::ai::ai_local_unload_model,
             commands::refinery::refinery_run_pipeline,
             commands::search::filesearch_fuzzy,
             commands::search::translation_translate,

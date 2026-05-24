@@ -41,7 +41,7 @@ pub async fn translation_translate(
     target_lang: String,
     llm_config: LlmConfig,
 ) -> Result<String, AppError> {
-    let llm_service = Arc::new(LlmService::new(llm_config));
+    let llm_service = Arc::new(LlmService::new(llm_config, None));
     let translator = Translator::new(llm_service);
     translator.translate(&text, &target_lang).await.map_err(|e| AppError::Other(e))
 }

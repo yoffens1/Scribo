@@ -144,7 +144,7 @@ pub async fn retrieve(
     let vault_lang = config.vault_lang.clone().unwrap_or_else(|| get_vault_language(state));
 
     let llm_service = if let Some(llm_cfg) = &config.llm_config {
-        Some(Arc::new(LlmService::new(llm_cfg.clone())))
+        Some(Arc::new(LlmService::new(llm_cfg.clone(), None)))
     } else {
         None
     };

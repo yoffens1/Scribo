@@ -17,7 +17,14 @@
     "inbox": "npx tsx frontend/test/cli/refine-inbox.ts",
     "test:refinery:unit": "npx tsx --test frontend/test/refinery/unit/*.test.ts",
     "test:refinery:integration": "npx tsx --test frontend/test/refinery/integration/*.test.ts",
-    "test:integration": "npx tsx --test frontend/test/database/integration/*.test.ts"
+    "test:integration": "npx tsx --test frontend/test/database/integration/*.test.ts",
+    "import:inbox": "cargo run --manifest-path src-tauri/Cargo.toml -- import-dir /home/yoffens/obsidian2026/1-INBOX/",
+    "chunk:inbox": "cargo run --manifest-path src-tauri/Cargo.toml -- chunk-file",
+    "bench:chunker": "cargo bench --manifest-path src-tauri/Cargo.toml --bench chunker_bench",
+    "test:chunker:rs": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests",
+    "test:chunker:rs:embedding": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests embedding",
+    "test:chunker:rs:generation": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests generation",
+    "test:chunker:rs:structural": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests structural"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

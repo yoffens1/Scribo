@@ -39,3 +39,24 @@ pub struct EmbedderConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provider {
+    OpenAi,      // covers openai, openrouter, deepseek, ollama, lmstudio, vllm
+    Anthropic,
+    Gemini,
+    Local,       // llama.cpp
+}
+
+impl Provider {
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "openai" | "openrouter" | "deepseek" | "ollama" | "lmstudio" | "vllm"
+                                  => Ok(Self::OpenAi),
+            "anthropic" | "claude" => Ok(Self::Anthropic),
+            "gemini" | "google"    => Ok(Self::Gemini),
+            "local" | "llamacpp"   => Ok(Self::Local),
+            other                  => Err(format!("Unknown provider: {}", other)),
+        }
+    }
+}

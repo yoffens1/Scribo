@@ -2,6 +2,7 @@ pub mod types;
 pub mod llm;
 pub mod prompts;
 pub mod embedding;
+pub mod models;
 
 pub use types::{LlmConfig, LlmResponse, Message, EmbedderConfig};
 pub use llm::LlmService;
