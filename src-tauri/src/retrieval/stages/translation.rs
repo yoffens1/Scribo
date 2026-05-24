@@ -1,5 +1,4 @@
-use crate::ai::LlmService;
-use crate::translation::Translator;
+use crate::ai::{LlmService, Translator};
 use std::sync::Arc;
 
 pub async fn run_translation(

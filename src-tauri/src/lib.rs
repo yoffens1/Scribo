@@ -7,7 +7,6 @@ pub mod chunker;
 pub mod db;
 pub mod ai;
 pub mod refinery;
-pub mod translation;
 pub mod retrieval;
 pub mod logging;
 

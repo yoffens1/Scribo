@@ -1,7 +1,6 @@
 use crate::services::filesearch::{FuzzySearch, SearchHit};
-use crate::translation::Translator;
+use crate::ai::{LlmConfig, LlmService, Translator};
 use crate::retrieval::{detect_language, is_english, retrieve, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
-use crate::ai::{LlmConfig, LlmService};
 use crate::error::AppError;
 use crate::db::DbState;
 use tauri::State;
