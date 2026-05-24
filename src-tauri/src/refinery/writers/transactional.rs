@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tokio::fs;
 use crate::DbState;
 use crate::refinery::types::WriteOperation;
-use super::file_writer::FileWriter;
+use super::file::FileWriter;
 
 pub struct TransactionalWriter {
     writer: FileWriter,

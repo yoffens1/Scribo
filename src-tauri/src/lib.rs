@@ -1,11 +1,12 @@
 mod commands;
 mod error;
-pub mod indexer;
+pub mod cli;
+pub mod domain;
+pub mod services;
 pub mod chunker;
 pub mod db;
 pub mod ai;
 pub mod refinery;
-pub mod filesearch;
 pub mod translation;
 pub mod retrieval;
 pub mod logging;
@@ -28,47 +29,47 @@ pub fn run() {
         .manage(DbState::new())
         .invoke_handler(tauri::generate_handler![
             crate::logging::log_event,
-            commands::db::core::db_initialize,
-            commands::db::core::db_close,
-            commands::db::core::db_vacuum,
-            commands::db::core::db_optimize,
-            commands::db::files::files_get_by_path,
-            commands::db::files::files_upsert_indexing,
-            commands::db::files::files_mark_indexed,
-            commands::db::files::files_mark_failed,
-            commands::db::files::files_insert_failed,
-            commands::db::files::files_soft_delete,
-            commands::db::files::files_restore,
-            commands::db::files::files_rename,
-            commands::db::files::files_count_chunks,
-            commands::db::files::files_hard_delete,
-            commands::db::files::files_get_all,
-            commands::db::files::files_get_by_source_file_id,
-            commands::db::files::files_insert_minimal,
-            commands::db::files::files_sync_upsert,
-            commands::db::files::files_update_content_with_diff,
-            commands::db::chunks::chunks_delete_by_file_id,
-            commands::db::chunks::chunks_insert,
-            commands::db::chunks::chunks_get_by_file_path,
-            commands::db::chunks::chunks_get_all,
-            commands::db::chunks::chunks_get_by_file_name,
-            commands::db::chunks::chunks_search,
-            commands::db::chunks::chunks_vector_search,
-            commands::srs::cards::cards_insert_ignore,
-            commands::srs::cards::cards_review_fsrs,
-            commands::ai::chunker::chunk_text_paired,
-            commands::ai::chunker::count_text_tokens,
-            commands::ai::models::ai_generate,
-            commands::ai::models::ai_generate_embeddings,
-            commands::ai::models::ai_list_local_models,
-            commands::ai::models::ai_local_unload_model,
-            commands::ai::refinery::refinery_run_pipeline,
-            commands::search::retrieval::filesearch_fuzzy,
-            commands::search::retrieval::translation_translate,
-            commands::search::retrieval::retrieval_detect_language,
-            commands::search::retrieval::retrieval_is_english,
-            commands::search::retrieval::retrieval_query,
-            commands::search::retrieval::retrieval_fetch,
+            commands::db::db_initialize,
+            commands::db::db_close,
+            commands::db::db_vacuum,
+            commands::db::db_optimize,
+            commands::files::files_get_by_path,
+            commands::files::files_upsert_indexing,
+            commands::files::files_mark_indexed,
+            commands::files::files_mark_failed,
+            commands::files::files_insert_failed,
+            commands::files::files_soft_delete,
+            commands::files::files_restore,
+            commands::files::files_rename,
+            commands::files::files_count_chunks,
+            commands::files::files_hard_delete,
+            commands::files::files_get_all,
+            commands::files::files_get_by_source_file_id,
+            commands::files::files_insert_minimal,
+            commands::files::files_sync_upsert,
+            commands::files::files_update_content_with_diff,
+            commands::chunks::chunks_delete_by_file_id,
+            commands::chunks::chunks_insert,
+            commands::chunks::chunks_get_by_file_path,
+            commands::chunks::chunks_get_all,
+            commands::chunks::chunks_get_by_file_name,
+            commands::chunks::chunks_search,
+            commands::chunks::chunks_vector_search,
+            commands::cards::cards_insert_ignore,
+            commands::cards::cards_review_fsrs,
+            commands::chunker::chunk_text_paired,
+            commands::chunker::count_text_tokens,
+            commands::ai::ai_generate,
+            commands::ai::ai_generate_embeddings,
+            commands::ai::ai_list_local_models,
+            commands::ai::ai_local_unload_model,
+            commands::refinery::refinery_run_pipeline,
+            commands::search::filesearch_fuzzy,
+            commands::search::translation_translate,
+            commands::search::retrieval_detect_language,
+            commands::search::retrieval_is_english,
+            commands::search::retrieval_query,
+            commands::search::retrieval_fetch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

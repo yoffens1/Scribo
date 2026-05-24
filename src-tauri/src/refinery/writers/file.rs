@@ -4,7 +4,7 @@ use crate::DbState;
 use crate::ai::LlmService;
 use crate::ai::types::Message;
 use crate::refinery::types::WriteOperation;
-use crate::indexer::hash::compute_file_hash;
+use crate::db::hash::compute_file_hash;
 use std::sync::Arc;
 
 pub struct FileWriterContext {

@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 use rayon::prelude::*;
 use crate::chunker::stages::extract;
 use crate::chunker::types::ChunkOptions;
-use crate::chunker::stages::table;
+use crate::chunker::markdown::table;
 use crate::chunker::stages::token;
 use super::assemble::{glue_subheadings_to_content, assemble_raw_chunks};
 use super::table_restore::{restore_tables, linearize_table_chunks};

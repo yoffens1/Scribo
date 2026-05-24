@@ -1,5 +1,5 @@
-pub mod file_writer;
+pub mod file;
 pub mod transactional;
 
-pub use file_writer::{FileWriter, FileWriterContext};
+pub use file::{FileWriter, FileWriterContext};
 pub use transactional::TransactionalWriter;

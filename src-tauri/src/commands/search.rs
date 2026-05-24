@@ -1,4 +1,4 @@
-use crate::filesearch::{FuzzySearch, SearchHit};
+use crate::services::filesearch::{FuzzySearch, SearchHit};
 use crate::translation::Translator;
 use crate::retrieval::{detect_language, is_english, retrieve, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
 use crate::ai::{LlmConfig, LlmService};
