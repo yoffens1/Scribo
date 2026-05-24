@@ -64,6 +64,16 @@ pub fn apply_migrations(conn: &mut Connection, mut from_version: i32) -> Result<
     if from_version < 8 {
         migrate_v8(&tx)?;
         set_schema_version(&tx, 8)?;
+        from_version = 8;
+    }
+    if from_version < 9 {
+        migrate_v9(&tx)?;
+        set_schema_version(&tx, 9)?;
+        from_version = 9;
+    }
+    if from_version < 10 {
+        migrate_v10(&tx)?;
+        set_schema_version(&tx, 10)?;
     }
 
     tx.commit()?;
@@ -181,7 +191,18 @@ fn migrate_v8(conn: &Transaction) -> Result<(), AppError> {
          DROP INDEX IF EXISTS idx_chunks_file_id;
          DROP INDEX IF EXISTS idx_cards_file_id;"
     )?;
-    
+    Ok(())
+}
+
+fn migrate_v9(conn: &Transaction) -> Result<(), AppError> {
+    let sql = include_str!("migrations/v9_up.sql");
+    conn.execute_batch(sql)?;
+    Ok(())
+}
+
+fn migrate_v10(conn: &Transaction) -> Result<(), AppError> {
+    let sql = include_str!("migrations/v10_up.sql");
+    conn.execute_batch(sql)?;
     Ok(())
 }
 
@@ -235,18 +256,18 @@ mod tests {
         let mut conn = open();
         initialize_schema(&mut conn).expect("Init failed");
         conn.execute_batch(
-            "INSERT INTO files (file_path, file_name) VALUES ('test.md', 'test.md');",
+            "INSERT INTO notes (file_path, file_name, title, content) VALUES ('test.md', 'test.md', 'test', 'test');",
         ).unwrap();
         conn.execute(
-            "INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) VALUES (1, 0, 'hello world', X'00')",
+            "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (1, 0, 'hello world', X'00')",
             [],
         ).unwrap();
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM chunks_fts WHERE chunk_text MATCH 'hello'",
+            "SELECT COUNT(*) FROM fragments_fts WHERE text MATCH 'hello'",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 1, "INSERT trigger must index the chunk into FTS");
+        assert_eq!(count, 1, "INSERT trigger must index the fragment into FTS");
     }
 
     #[test]
@@ -270,9 +291,8 @@ mod tests {
                  embedding BLOB NOT NULL,
                  UNIQUE(file_id, chunk_index)
              );
-             INSERT INTO files (file_path, file_name) VALUES ('a.md', 'a.md');
              INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding)
-               VALUES (1, 0, 'existing chunk content', X'00');",
+               VALUES (1, 0, 'existing fragment content', X'00');",
         ).unwrap();
         let tx = conn.transaction().unwrap();
         migrate_v6(&tx).expect("migrate_v6 failed");
@@ -298,12 +318,12 @@ mod tests {
                 .collect::<rusqlite::Result<_>>()
                 .unwrap()
         };
-        for expected in &["cards", "chunks", "chunks_fts", "files", "meta"] {
+        for expected in &["cards", "fragments", "fragments_fts", "notes", "meta", "schedules", "note_revisions", "review_logs"] {
             assert!(tables.iter().any(|t| t == expected), "Missing table: {}", expected);
         }
-        for col in &["source_file_id", "embedding_model", "chunking_version", "status", "indexed_at"] {
+        for col in &["source_note_id", "embedding_model", "fragmenting_version", "indexing_status", "indexed_at", "title", "content", "tags"] {
             let tx = conn.unchecked_transaction().unwrap();
-            assert!(column_exists(&tx, "files", col).unwrap(), "Missing column files.{}", col);
+            assert!(column_exists(&tx, "notes", col).unwrap(), "Missing column notes.{}", col);
             tx.rollback().unwrap();
         }
         let version: i32 = conn.query_row(
@@ -311,6 +331,6 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(version, 8, "Schema version must be 8 after full migration");
+        assert_eq!(version, 10, "Schema version must be 10 after full migration");
     }
 }

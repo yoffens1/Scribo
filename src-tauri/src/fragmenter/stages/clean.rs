@@ -1,8 +1,8 @@
-use crate::chunker::types::ChunkOptions;
-use crate::chunker::markdown::formatting;
-use crate::chunker::markdown::latex;
+use crate::fragmenter::types::FragmentOptions;
+use crate::fragmenter::markdown::formatting;
+use crate::fragmenter::markdown::latex;
 
-pub fn clean_chunk(chunk: &str, options: &ChunkOptions) -> String {
+pub fn clean_fragment(fragment: &str, options: &FragmentOptions) -> String {
     type Transform = fn(&str) -> std::borrow::Cow<'_, str>;
     
     let transforms: &[(bool, Transform)] = &[
@@ -16,7 +16,7 @@ pub fn clean_chunk(chunk: &str, options: &ChunkOptions) -> String {
         (options.compact_lines, formatting::remove_empty_lines),
     ];
 
-    let mut c = std::borrow::Cow::Borrowed(chunk);
+    let mut c = std::borrow::Cow::Borrowed(fragment);
     
     for (enabled, transform) in transforms {
         if *enabled {

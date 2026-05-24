@@ -1,37 +1,37 @@
 use std::sync::LazyLock;
-use crate::chunker::types;
-use crate::chunker::types::ChunkOptions;
-use crate::chunker::markdown::table;
-use super::clean::clean_chunk;
-use super::assemble::assemble_raw_chunks;
+use crate::fragmenter::types;
+use crate::fragmenter::types::FragmentOptions;
+use crate::fragmenter::markdown::table;
+use super::clean::clean_fragment;
+use super::assemble::assemble_raw_fragments;
 
 static RE_TABLE_PLACEHOLDER: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\{\{TABLE_\d+\}\}").unwrap());
 static RE_HEADING_RESTORE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\s*#{1,6}\s").unwrap());
 
-pub fn restore_tables(raw_chunks: Vec<String>, tables: &[types::TableInfo], options: &ChunkOptions) -> Vec<String> {
+pub fn restore_tables(raw_fragments: Vec<String>, tables: &[types::TableInfo], options: &FragmentOptions) -> Vec<String> {
     let mut used = std::collections::HashSet::new();
     let mut result = Vec::new();
 
-    for chunk in raw_chunks {
-        let mut chunk_tables = Vec::new();
-        for cap in RE_TABLE_PLACEHOLDER.captures_iter(&chunk) {
+    for fragment in raw_fragments {
+        let mut fragment_tables = Vec::new();
+        for cap in RE_TABLE_PLACEHOLDER.captures_iter(&fragment) {
             let placeholder = cap[0].to_string();
             if let Some(t) = tables.iter().find(|t| t.placeholder == placeholder) {
-                if !chunk_tables.iter().any(|existing: &&types::TableInfo| existing.placeholder == placeholder) {
-                    chunk_tables.push(t);
+                if !fragment_tables.iter().any(|existing: &&types::TableInfo| existing.placeholder == placeholder) {
+                    fragment_tables.push(t);
                 }
             }
         }
 
-        for t in &chunk_tables {
+        for t in &fragment_tables {
             used.insert(t.placeholder.clone());
         }
 
-        if options.separate_tables_as_chunks && !chunk_tables.is_empty() {
-            result.extend(split_chunk_around_tables(&chunk, &chunk_tables));
+        if options.separate_tables_as_fragments && !fragment_tables.is_empty() {
+            result.extend(split_fragment_around_tables(&fragment, &fragment_tables));
         } else {
-            let mut restored = chunk.clone();
-            for t in chunk_tables {
+            let mut restored = fragment.clone();
+            for t in fragment_tables {
                 restored = restored.replace(&t.placeholder, &t.content);
             }
             result.push(restored);
@@ -46,18 +46,18 @@ pub fn restore_tables(raw_chunks: Vec<String>, tables: &[types::TableInfo], opti
 
     result
         .into_iter()
-        .filter(|chunk| {
-            let lines: Vec<&str> = chunk.lines().filter(|l| !l.trim().is_empty()).collect();
+        .filter(|fragment| {
+            let lines: Vec<&str> = fragment.lines().filter(|l| !l.trim().is_empty()).collect();
             !lines.iter().all(|line| RE_HEADING_RESTORE.is_match(line))
         })
         .collect()
 }
 
-pub fn split_chunk_around_tables(chunk: &str, chunk_tables: &[&types::TableInfo]) -> Vec<String> {
+pub fn split_fragment_around_tables(fragment: &str, fragment_tables: &[&types::TableInfo]) -> Vec<String> {
     let mut parts = Vec::new();
-    let mut remaining = chunk;
+    let mut remaining = fragment;
 
-    for t in chunk_tables {
+    for t in fragment_tables {
         if let Some(idx) = remaining.find(&t.placeholder) {
             let before = remaining[..idx].trim();
             remaining = &remaining[idx + t.placeholder.len()..];
@@ -77,12 +77,12 @@ pub fn split_chunk_around_tables(chunk: &str, chunk_tables: &[&types::TableInfo]
     parts
 }
 
-pub fn partition_table_lines(chunk: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
-    if !chunk.contains('|') {
-        return (chunk.lines().map(|s| s.to_string()).collect(), Vec::new(), Vec::new());
+pub fn partition_table_lines(fragment: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+    if !fragment.contains('|') {
+        return (fragment.lines().map(|s| s.to_string()).collect(), Vec::new(), Vec::new());
     }
 
-    let lines = chunk.lines();
+    let lines = fragment.lines();
     let mut before = Vec::new();
     let mut table_block = Vec::new();
     let mut after = Vec::new();
@@ -106,16 +106,16 @@ pub fn partition_table_lines(chunk: &str) -> (Vec<String>, Vec<String>, Vec<Stri
     (before, table_block, after)
 }
 
-pub fn linearize_table_chunks(chunks: Vec<String>, options: &ChunkOptions) -> Vec<String> {
+pub fn linearize_table_fragments(fragments: Vec<String>, options: &FragmentOptions) -> Vec<String> {
     if !options.linearize_tables {
-        return chunks;
+        return fragments;
     }
 
     let mut result = Vec::new();
-    for chunk in chunks {
-        let (before, table_block, after) = partition_table_lines(&chunk);
+    for fragment in fragments {
+        let (before, table_block, after) = partition_table_lines(&fragment);
         if table_block.is_empty() {
-            result.push(chunk);
+            result.push(fragment);
             continue;
         }
 
@@ -126,32 +126,32 @@ pub fn linearize_table_chunks(chunks: Vec<String>, options: &ChunkOptions) -> Ve
         clean_opts.lower_case = false;
         clean_opts.compact_lines = false;
         clean_opts.strip_heading_markers = false;
-        rows = rows.iter().map(|row| clean_chunk(row, &clean_opts)).collect();
+        rows = rows.iter().map(|row| clean_fragment(row, &clean_opts)).collect();
 
-        let mut sub_chunks = if options.each_table_row_as_separate_chunk {
+        let mut sub_fragments = if options.each_table_row_as_separate_fragment {
             rows
         } else {
             let rows_cow: Vec<std::borrow::Cow<'_, str>> = rows.into_iter().map(std::borrow::Cow::Owned).collect();
-            assemble_raw_chunks(rows_cow, options)
+            assemble_raw_fragments(rows_cow, options)
         };
 
-        if !before.is_empty() && !sub_chunks.is_empty() {
-            sub_chunks[0] = format!("{}\n{}", before.join("\n"), sub_chunks[0]);
+        if !before.is_empty() && !sub_fragments.is_empty() {
+            sub_fragments[0] = format!("{}\n{}", before.join("\n"), sub_fragments[0]);
         } else if !before.is_empty() {
-            sub_chunks.push(before.join("\n"));
+            sub_fragments.push(before.join("\n"));
         }
 
-        if !after.is_empty() && !sub_chunks.is_empty() {
-            let last_idx = sub_chunks.len() - 1;
-            sub_chunks[last_idx] = format!("{}\n{}", sub_chunks[last_idx], after.join("\n"));
+        if !after.is_empty() && !sub_fragments.is_empty() {
+            let last_idx = sub_fragments.len() - 1;
+            sub_fragments[last_idx] = format!("{}\n{}", sub_fragments[last_idx], after.join("\n"));
         } else if !after.is_empty() {
-            sub_chunks.push(after.join("\n"));
+            sub_fragments.push(after.join("\n"));
         }
 
-        if sub_chunks.is_empty() {
-            result.push(chunk);
+        if sub_fragments.is_empty() {
+            result.push(fragment);
         } else {
-            result.extend(sub_chunks);
+            result.extend(sub_fragments);
         }
     }
     result

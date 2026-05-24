@@ -1,28 +1,28 @@
 use rusqlite::Connection;
 use crate::error::AppError;
-use crate::domain::chunk::{Chunk, ChunkInsertRow, SearchHit, VectorSearchHit};
+use crate::domain::fragment::{Fragment, FragmentInsertRow, SearchHit, VectorSearchHit};
 
 
 
-pub fn delete_by_file_id(conn: &Connection, file_id: i64) -> Result<i64, AppError> {
+pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
-        "DELETE FROM chunks WHERE file_id = ?",
-        rusqlite::params![file_id],
+        "DELETE FROM fragments WHERE note_id = ?",
+        rusqlite::params![note_id],
     )?;
     Ok(deleted as i64)
 }
 
-pub fn insert(conn: &mut Connection, file_id: i64, rows: Vec<ChunkInsertRow>) -> Result<(), AppError> {
+pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>) -> Result<(), AppError> {
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO chunks (file_id, chunk_index, chunk_text, token_count, embedding)
+            "INSERT INTO fragments (note_id, fragment_index, text, token_count, embedding)
              VALUES (?, ?, ?, ?, ?)",
         )?;
         for row in &rows {
             stmt.execute(rusqlite::params![
-                file_id,
-                row.chunk_index,
+                note_id,
+                row.fragment_index,
                 row.text,
                 row.tokens,
                 row.embedding
@@ -35,27 +35,30 @@ pub fn insert(conn: &mut Connection, file_id: i64, rows: Vec<ChunkInsertRow>) ->
 
 
 
-fn fetch_chunks(
+fn fetch_fragments(
     conn: &Connection,
     extra_where: &str,
     params: &[&dyn rusqlite::types::ToSql],
-) -> Result<Vec<Chunk>, AppError> {
-    let base = "SELECT c.chunk_id, f.file_path, c.chunk_index, c.chunk_text, c.token_count, c.embedding
-                FROM chunks c
-                JOIN files f ON f.file_id = c.file_id";
+) -> Result<Vec<Fragment>, AppError> {
+    let base = "SELECT c.fragment_id, f.file_path, c.fragment_index, c.text, c.token_count, c.embedding
+                FROM fragments c
+                JOIN notes f ON f.note_id = c.note_id";
     let sql = if extra_where.is_empty() {
-        format!("{} ORDER BY f.file_path, c.chunk_index", base)
+        format!("{} ORDER BY f.file_path, c.fragment_index", base)
     } else {
-        format!("{} WHERE {} ORDER BY f.file_path, c.chunk_index", base, extra_where)
+        format!("{} WHERE {} ORDER BY f.file_path, c.fragment_index", base, extra_where)
     };
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params, |row| {
-        Ok(Chunk {
-            chunk_id: row.get(0)?,
+        Ok(Fragment {
+            id: crate::domain::fragment::FragmentId(row.get(0)?),
+            note_id: crate::domain::note::NoteId(0), // Dummy value since query doesn't fetch it
+            text: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            fragment_id: row.get(0)?,
             file_path: row.get(1)?,
-            chunk_index: row.get(2)?,
-            chunk_text: row.get(3)?,
+            fragment_index: row.get(2)?,
+            fragment_text: row.get(3)?,
             token_count: row.get(4)?,
             embedding: row.get(5)?,
         })
@@ -67,34 +70,34 @@ pub fn get_by_file_path(
     conn: &Connection,
     file_path: &str,
     include_deleted: bool,
-) -> Result<Vec<Chunk>, AppError> {
+) -> Result<Vec<Fragment>, AppError> {
     let clause = if include_deleted {
         "f.file_path = ?"
     } else {
         "f.file_path = ? AND f.is_deleted = 0"
     };
-    fetch_chunks(conn, clause, &[&file_path])
+    fetch_fragments(conn, clause, &[&file_path])
 }
 
 pub fn get_all(
     conn: &Connection,
     include_deleted: bool,
-) -> Result<Vec<Chunk>, AppError> {
+) -> Result<Vec<Fragment>, AppError> {
     let clause = if include_deleted { "" } else { "f.is_deleted = 0" };
-    fetch_chunks(conn, clause, &[])
+    fetch_fragments(conn, clause, &[])
 }
 
 pub fn get_by_file_name(
     conn: &Connection,
     name: &str,
     include_deleted: bool,
-) -> Result<Vec<Chunk>, AppError> {
+) -> Result<Vec<Fragment>, AppError> {
     let clause = if include_deleted {
         "f.file_name = ?"
     } else {
         "f.file_name = ? AND f.is_deleted = 0"
     };
-    fetch_chunks(conn, clause, &[&name])
+    fetch_fragments(conn, clause, &[&name])
 }
 
 
@@ -105,24 +108,24 @@ pub fn search(
     limit: i64,
 ) -> Result<Vec<SearchHit>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT c.chunk_id,
+        "SELECT c.fragment_id,
                 f.file_path,
-                c.chunk_index,
-                snippet(chunks_fts, 0, '<b>', '</b>', '…', 32),
-                bm25(chunks_fts)
-         FROM chunks_fts
-         JOIN chunks c ON c.chunk_id = chunks_fts.rowid
-         JOIN files  f ON f.file_id  = c.file_id
-         WHERE chunks_fts MATCH ?
+                c.fragment_index,
+                snippet(fragments_fts, 0, '<b>', '</b>', '…', 32),
+                bm25(fragments_fts)
+         FROM fragments_fts
+         JOIN fragments c ON c.fragment_id = fragments_fts.rowid
+         JOIN notes  f ON f.note_id  = c.note_id
+         WHERE fragments_fts MATCH ?
            AND f.is_deleted = 0
-         ORDER BY bm25(chunks_fts)
+         ORDER BY bm25(fragments_fts)
          LIMIT ?",
     )?;
     let rows = stmt.query_map(rusqlite::params![query, limit], |row| {
         Ok(SearchHit {
-            chunk_id: row.get(0)?,
+            fragment_id: row.get(0)?,
             file_path: row.get(1)?,
-            chunk_index: row.get(2)?,
+            fragment_index: row.get(2)?,
             snippet: row.get(3)?,
             score: row.get(4)?,
         })
@@ -156,12 +159,12 @@ fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
 
 #[derive(Debug)]
 struct HitRecord {
-    chunk_id: i64,
+    fragment_id: i64,
     similarity: f32,
 }
 impl PartialEq for HitRecord {
     fn eq(&self, other: &Self) -> bool {
-        self.chunk_id == other.chunk_id
+        self.fragment_id == other.fragment_id
     }
 }
 impl Eq for HitRecord {}
@@ -187,21 +190,21 @@ pub fn vector_search(
 
     {
         let mut stmt = conn.prepare(
-            "SELECT c.chunk_id, c.embedding
-             FROM chunks c
-             JOIN files f ON f.file_id = c.file_id
+            "SELECT c.fragment_id, c.embedding
+             FROM fragments c
+             JOIN notes f ON f.note_id = c.note_id
              WHERE f.is_deleted = 0",
         )?;
 
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
-            let chunk_id: i64 = row.get(0)?;
+            let fragment_id: i64 = row.get(0)?;
             let blob_ref = row.get_ref(1)?;
             if let rusqlite::types::ValueRef::Blob(bytes) = blob_ref {
                 let cand_vector = bytes_to_f32_slice(bytes);
                 let similarity = cosine_similarity(query_vector, cand_vector);
                 
-                top_hits.push(HitRecord { chunk_id, similarity });
+                top_hits.push(HitRecord { fragment_id, similarity });
                 if top_hits.len() > limit {
                     top_hits.pop();
                 }
@@ -216,14 +219,14 @@ pub fn vector_search(
         return Ok(Vec::new());
     }
 
-    let ids: Vec<String> = hits.iter().map(|h| h.chunk_id.to_string()).collect();
+    let ids: Vec<String> = hits.iter().map(|h| h.fragment_id.to_string()).collect();
     let in_clause = ids.join(",");
 
     let sql = format!(
-        "SELECT c.chunk_id, f.file_path, c.chunk_index, c.chunk_text
-         FROM chunks c
-         JOIN files f ON f.file_id = c.file_id
-         WHERE c.chunk_id IN ({})",
+        "SELECT c.fragment_id, f.file_path, c.fragment_index, c.text
+         FROM fragments c
+         JOIN notes f ON f.note_id = c.note_id
+         WHERE c.fragment_id IN ({})",
         in_clause
     );
 
@@ -245,12 +248,12 @@ pub fn vector_search(
 
     let mut final_results = Vec::with_capacity(hits.len());
     for h in hits {
-        if let Some((path, idx, text)) = db_data.remove(&h.chunk_id) {
+        if let Some((path, idx, text)) = db_data.remove(&h.fragment_id) {
             final_results.push(VectorSearchHit {
-                chunk_id: h.chunk_id,
+                fragment_id: h.fragment_id,
                 file_path: path,
-                chunk_index: idx,
-                chunk_text: text,
+                fragment_index: idx,
+                fragment_text: text,
                 similarity: h.similarity,
             });
         }

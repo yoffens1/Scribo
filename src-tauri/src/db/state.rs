@@ -13,7 +13,8 @@ use crate::error::AppError;
 /// `write_lock` — serializes all write transactions so SQLite's single-writer model
 ///               is enforced in Rust rather than relying on `busy_timeout`.
 pub struct DbState {
-    pub pool: RwLock<Option<Pool<SqliteConnectionManager>>>,
+    pub pool: std::sync::Arc<RwLock<Option<Pool<SqliteConnectionManager>>>>,
+    pub reviewer: std::sync::Arc<crate::services::reviewer::ReviewerService>,
     pub write_lock: Mutex<()>,
 }
 
@@ -25,8 +26,14 @@ impl Default for DbState {
 
 impl DbState {
     pub fn new() -> Self {
+        let pool = std::sync::Arc::new(RwLock::new(None));
+        let schedules_repo = std::sync::Arc::new(crate::db::repos::schedules::SqliteSchedulesRepo::new(pool.clone()));
+        let logs_repo = std::sync::Arc::new(crate::db::repos::review_logs::SqliteReviewLogsRepo::new(pool.clone()));
+        let reviewer = std::sync::Arc::new(crate::services::reviewer::ReviewerService::new(schedules_repo, logs_repo));
+
         Self {
-            pool: RwLock::new(None),
+            pool,
+            reviewer,
             write_lock: Mutex::new(()),
         }
     }

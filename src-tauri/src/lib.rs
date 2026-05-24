@@ -3,7 +3,7 @@ mod error;
 pub mod cli;
 pub mod domain;
 pub mod services;
-pub mod chunker;
+pub mod fragmenter;
 pub mod db;
 pub mod ai;
 pub mod refinery;
@@ -32,43 +32,19 @@ pub fn run() {
             commands::db::db_close,
             commands::db::db_vacuum,
             commands::db::db_optimize,
-            commands::files::files_get_by_path,
-            commands::files::files_upsert_indexing,
-            commands::files::files_mark_indexed,
-            commands::files::files_mark_failed,
-            commands::files::files_insert_failed,
-            commands::files::files_soft_delete,
-            commands::files::files_restore,
-            commands::files::files_rename,
-            commands::files::files_count_chunks,
-            commands::files::files_hard_delete,
-            commands::files::files_get_all,
-            commands::files::files_get_by_source_file_id,
-            commands::files::files_insert_minimal,
-            commands::files::files_sync_upsert,
-            commands::files::files_update_content_with_diff,
-            commands::chunks::chunks_delete_by_file_id,
-            commands::chunks::chunks_insert,
-            commands::chunks::chunks_get_by_file_path,
-            commands::chunks::chunks_get_all,
-            commands::chunks::chunks_get_by_file_name,
-            commands::chunks::chunks_search,
-            commands::chunks::chunks_vector_search,
-            commands::cards::cards_insert_ignore,
-            commands::cards::cards_review_fsrs,
-            commands::chunker::chunk_text_paired,
-            commands::chunker::count_text_tokens,
             commands::ai::ai_generate,
             commands::ai::ai_generate_embeddings,
             commands::ai::ai_list_local_models,
             commands::ai::ai_local_unload_model,
             commands::refinery::refinery_run_pipeline,
-            commands::search::filesearch_fuzzy,
+            commands::search::notesearch_fuzzy,
             commands::search::translation_translate,
             commands::search::retrieval_detect_language,
             commands::search::retrieval_is_english,
             commands::search::retrieval_query,
             commands::search::retrieval_fetch,
+            commands::reviewer::reviewer_get_due,
+            commands::reviewer::reviewer_rate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

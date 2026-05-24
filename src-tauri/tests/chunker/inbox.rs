@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use scribo_lib::chunker::{chunk_paired, ChunkOptions};
+use scribo_lib::fragmenter::{fragment_paired, FragmentOptions};
 
 #[test]
 fn test_real_inbox_files() {

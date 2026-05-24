@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
-use crate::chunker::types::ChunkOptions;
-use crate::chunker::stages::token;
+use crate::fragmenter::types::FragmentOptions;
+use crate::fragmenter::stages::token;
 
 static RE_SUBHEADING: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^#{1,6}\s").unwrap());
 
@@ -26,13 +26,13 @@ pub struct Para {
     pub tokens: usize,
 }
 
-pub fn assemble_raw_chunks(paragraphs: Vec<std::borrow::Cow<'_, str>>, options: &ChunkOptions) -> Vec<String> {
+pub fn assemble_raw_fragments(paragraphs: Vec<std::borrow::Cow<'_, str>>, options: &FragmentOptions) -> Vec<String> {
     let paras: Vec<Para> = paragraphs.into_iter().map(|text| Para {
         tokens: token::count_tokens(text.as_ref()),
         text: text.into_owned(),
     }).collect();
 
-    let mut raw_chunks = Vec::new();
+    let mut raw_fragments = Vec::new();
     let mut current_batch: Vec<Para> = Vec::new();
     let mut current_tokens = 0;
 
@@ -40,8 +40,8 @@ pub fn assemble_raw_chunks(paragraphs: Vec<std::borrow::Cow<'_, str>>, options: 
         let pt = para.tokens;
 
         if pt > options.max_tokens {
-            flush_batch(&mut current_batch, &mut raw_chunks, &mut current_tokens);
-            handle_oversized_para(&para.text, options, &mut current_batch, &mut raw_chunks, &mut current_tokens);
+            flush_batch(&mut current_batch, &mut raw_fragments, &mut current_tokens);
+            handle_oversized_para(&para.text, options, &mut current_batch, &mut raw_fragments, &mut current_tokens);
             continue;
         }
 
@@ -55,7 +55,7 @@ pub fn assemble_raw_chunks(paragraphs: Vec<std::borrow::Cow<'_, str>>, options: 
             for p in &current_batch {
                 text_batch.push(p.text.clone());
             }
-            raw_chunks.push(text_batch.join("\n\n"));
+            raw_fragments.push(text_batch.join("\n\n"));
             current_tokens = overlap_tokens;
         }
 
@@ -63,14 +63,14 @@ pub fn assemble_raw_chunks(paragraphs: Vec<std::borrow::Cow<'_, str>>, options: 
         current_tokens += pt;
     }
 
-    flush_batch(&mut current_batch, &mut raw_chunks, &mut current_tokens);
-    raw_chunks
+    flush_batch(&mut current_batch, &mut raw_fragments, &mut current_tokens);
+    raw_fragments
 }
 
-pub fn flush_batch(current_batch: &mut Vec<Para>, raw_chunks: &mut Vec<String>, current_tokens: &mut usize) {
+pub fn flush_batch(current_batch: &mut Vec<Para>, raw_fragments: &mut Vec<String>, current_tokens: &mut usize) {
     if !current_batch.is_empty() {
         let text_batch: Vec<String> = current_batch.drain(..).map(|p| p.text).collect();
-        raw_chunks.push(text_batch.join("\n\n"));
+        raw_fragments.push(text_batch.join("\n\n"));
         *current_tokens = 0;
     }
 }
@@ -92,19 +92,19 @@ pub fn compute_overlap(current_batch: &[Para], overlap_limit: usize) -> (usize, 
 
 pub fn handle_oversized_para(
     para_text: &str, 
-    options: &ChunkOptions, 
+    options: &FragmentOptions, 
     current_batch: &mut Vec<Para>, 
-    raw_chunks: &mut Vec<String>, 
+    raw_fragments: &mut Vec<String>, 
     current_tokens: &mut usize
 ) {
     let sub_paras = token::split_oversized_paragraph(para_text, options.max_tokens);
     for (sub, sub_tokens) in sub_paras {
         if *current_tokens + sub_tokens > options.max_tokens {
-            flush_batch(current_batch, raw_chunks, current_tokens);
+            flush_batch(current_batch, raw_fragments, current_tokens);
         }
         
         if sub_tokens > options.max_tokens {
-            raw_chunks.push(sub);
+            raw_fragments.push(sub);
         } else {
             current_batch.push(Para { text: sub, tokens: sub_tokens });
             *current_tokens += sub_tokens;

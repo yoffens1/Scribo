@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use crate::AppError;
 use crate::DbState;
-use crate::db::repos::chunks;
+use crate::db::repos::fragments;
 use crate::ai::LlmService;
 use crate::retrieval::language::detect_language;
 use crate::retrieval::types::{
-    RetrievalConfig, RetrieveOptions, RetrieveFilters, SearchResult, ChunkRef, FetchQuery, FetchResult
+    RetrievalConfig, RetrieveOptions, RetrieveFilters, SearchResult, FragmentRef, FetchQuery, FetchResult
 };
 use crate::retrieval::fusion::rrf;
 use crate::retrieval::stages::{
@@ -43,8 +43,8 @@ pub fn default_synonyms() -> HashMap<String, Vec<String>> {
 }
 
 fn get_vault_language(state: &DbState) -> String {
-    let chunks = state.with_conn(|conn| {
-        let mut stmt = conn.prepare("SELECT chunk_text FROM chunks WHERE chunk_text IS NOT NULL LIMIT 50")?;
+    let fragments = state.with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT fragment_text FROM fragments WHERE fragment_text IS NOT NULL LIMIT 50")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut res = Vec::new();
         for r in rows {
@@ -53,12 +53,12 @@ fn get_vault_language(state: &DbState) -> String {
         Ok(res)
     }).unwrap_or_default();
 
-    if chunks.is_empty() {
+    if fragments.is_empty() {
         return "en".to_string();
     }
 
     let mut counts = HashMap::new();
-    for text in chunks {
+    for text in fragments {
         if text.trim().len() < 10 {
             continue;
         }
@@ -94,12 +94,12 @@ fn apply_filters(results: Vec<SearchResult>, filters: &Option<RetrieveFilters>) 
     if let Some(ref f) = filters {
         results.into_iter().filter(|r| {
             if let Some(ref fp) = f.file_path {
-                if &r.chunk_ref.file_path != fp {
+                if &r.fragment_ref.file_path != fp {
                     return false;
                 }
             }
             if let Some(ref folder) = f.folder {
-                if !r.chunk_ref.file_path.starts_with(folder) {
+                if !r.fragment_ref.file_path.starts_with(folder) {
                     return false;
                 }
             }
@@ -114,18 +114,18 @@ fn hydrate_texts(state: &DbState, candidates: &mut [SearchResult]) {
     let mut by_path: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, c) in candidates.iter().enumerate() {
         if c.text.is_none() || c.text.as_ref().unwrap().is_empty() {
-            by_path.entry(c.chunk_ref.file_path.clone()).or_default().push(idx);
+            by_path.entry(c.fragment_ref.file_path.clone()).or_default().push(idx);
         }
     }
 
     for (file_path, indices) in by_path {
-        if let Ok(chunks) = state.with_conn(|conn| chunks::get_by_file_path(conn, &file_path, false)) {
-            let by_index: HashMap<usize, String> = chunks.into_iter()
-                .map(|ch| (ch.chunk_index as usize, ch.chunk_text.unwrap_or_default()))
+        if let Ok(fragments) = state.with_conn(|conn| fragments::get_by_file_path(conn, &file_path, false)) {
+            let by_index: HashMap<usize, String> = fragments.into_iter()
+                .map(|ch| (ch.fragment_index as usize, ch.fragment_text.unwrap_or_default()))
                 .collect();
             for idx in indices {
-                let chunk_idx = candidates[idx].chunk_ref.chunk_index;
-                if let Some(text) = by_index.get(&chunk_idx) {
+                let fragment_idx = candidates[idx].fragment_ref.fragment_index;
+                if let Some(text) = by_index.get(&fragment_idx) {
                     candidates[idx].text = Some(text.clone());
                 }
             }
@@ -247,9 +247,9 @@ pub async fn retrieve(
         let mut vector_results = Vec::new();
 
         if config.mode == "keyword" || config.mode == "hybrid" {
-            if let Ok(hits) = state.with_conn(|conn| chunks::search(conn, &v.text, over_fetch as i64)) {
+            if let Ok(hits) = state.with_conn(|conn| fragments::search(conn, &v.text, over_fetch as i64)) {
                 keyword_results = hits.into_iter().map(|h| SearchResult {
-                    chunk_ref: ChunkRef { file_path: h.file_path, chunk_index: h.chunk_index as usize },
+                    fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
                     score: h.score as f32,
                     text: Some(h.snippet),
                 }).collect();
@@ -271,11 +271,11 @@ pub async fn retrieve(
 
             if let Some(emb) = emb_to_use {
                 let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
-                if let Ok(hits) = state.with_conn(|conn| chunks::vector_search(conn, &emb_bytes, over_fetch)) {
+                if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
                     vector_results = hits.into_iter().map(|h| SearchResult {
-                        chunk_ref: ChunkRef { file_path: h.file_path, chunk_index: h.chunk_index as usize },
+                        fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
                         score: h.similarity,
-                        text: h.chunk_text,
+                        text: h.fragment_text,
                     }).collect();
                 }
             }
@@ -305,11 +305,11 @@ pub async fn retrieve(
             if let Ok(embs) = llm.generate_embeddings(vec![hyde.text.clone()]).await {
                 if let Some(emb) = embs.into_iter().next() {
                     let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
-                    if let Ok(hits) = state.with_conn(|conn| chunks::vector_search(conn, &emb_bytes, over_fetch)) {
+                    if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
                         let hyde_results: Vec<SearchResult> = hits.into_iter().map(|h| SearchResult {
-                            chunk_ref: ChunkRef { file_path: h.file_path, chunk_index: h.chunk_index as usize },
+                            fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
                             score: h.similarity,
-                            text: h.chunk_text,
+                            text: h.fragment_text,
                         }).collect();
                         variant_lists.push((hyde_results, hyde.weight));
                     }
@@ -368,11 +368,11 @@ pub fn fetch(
     let include_deleted = query.include_deleted.unwrap_or(false);
     let raw = state.with_conn(|conn| {
         if let Some(ref fp) = query.file_path {
-            chunks::get_by_file_path(conn, fp, include_deleted)
+            fragments::get_by_file_path(conn, fp, include_deleted)
         } else if let Some(ref fn_val) = query.file_name {
-            chunks::get_by_file_name(conn, fn_val, include_deleted)
+            fragments::get_by_file_name(conn, fn_val, include_deleted)
         } else {
-            chunks::get_all(conn, include_deleted)
+            fragments::get_all(conn, include_deleted)
         }
     })?;
 
@@ -387,12 +387,12 @@ pub fn fetch(
     };
 
     let results = page.into_iter().map(|ch| FetchResult {
-        chunk_id: Some(ch.chunk_id),
+        fragment_id: Some(ch.fragment_id),
         file_path: ch.file_path,
-        chunk_index: ch.chunk_index as usize,
-        chunk_text: ch.chunk_text,
+        fragment_index: ch.fragment_index as usize,
+        fragment_text: ch.fragment_text,
         token_count: ch.token_count,
-        embedding: ch.embedding,
+        embedding: ch.embedding.unwrap_or_default(),
     }).collect();
 
     Ok(results)

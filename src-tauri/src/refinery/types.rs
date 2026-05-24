@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AtomChunk {
+pub struct AtomFragment {
     pub hash: String,
     pub embedding_text: String,
     pub generation_text: String,
@@ -22,18 +22,18 @@ pub struct AtomChunk {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
-pub enum ChunkDecision {
+pub enum FragmentDecision {
     Keep {
-        chunk: AtomChunk,
+        fragment: AtomFragment,
         reason: String,
     },
     Merge {
         target_path: String,
-        source_chunk: AtomChunk,
+        source_fragment: AtomFragment,
         reason: String,
     },
     Reject {
-        chunk: AtomChunk,
+        fragment: AtomFragment,
         reason: String,
     },
 }
@@ -41,8 +41,8 @@ pub enum ChunkDecision {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeduplicationResult {
-    pub decisions: Vec<ChunkDecision>,
-    pub remaining: Vec<AtomChunk>,
+    pub decisions: Vec<FragmentDecision>,
+    pub remaining: Vec<AtomFragment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ pub struct FolderNode {
     #[serde(default)]
     pub children: Vec<FolderNode>,
     #[serde(default)]
-    pub assigned_chunks: Vec<String>,
+    pub assigned_fragments: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +79,7 @@ pub struct PlacementPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlacementDecision {
-    pub chunk_hash: String,
+    pub fragment_hash: String,
     pub output_path: String,
     pub action: String, // "create" | "merge" | "rename" | "nest"
     pub reason: String,
@@ -90,7 +90,7 @@ pub struct PlacementDecision {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WriteOperation {
     CreateFile { path: String, content: String },
-    MergeChunk { source_file: String, target_file: String, chunk_text: String },
+    MergeFragment { source_file: String, target_file: String, fragment_text: String },
     CreateFolder { path: String },
     MoveFile { from: String, to: String },
     DeleteFile { path: String },
@@ -100,7 +100,7 @@ pub enum WriteOperation {
 #[serde(rename_all = "camelCase")]
 pub struct RefineryResult {
     pub source_path: String,
-    pub chunks: Vec<AtomChunk>,
+    pub fragments: Vec<AtomFragment>,
     pub dedup: DeduplicationResult,
     pub taxonomy: ProposedTaxonomy,
     pub placement: PlacementPlan,
@@ -113,9 +113,9 @@ pub struct RefineryResult {
 pub struct BatchRefineryResult {
     pub results: Vec<RefineryResult>,
     pub errors: Vec<RefineryError>,
-    pub total_chunks: usize,
-    pub merged_chunks: usize,
-    pub created_files: usize,
+    pub total_fragments: usize,
+    pub merged_fragments: usize,
+    pub created_notes: usize,
     pub created_folders: usize,
 }
 

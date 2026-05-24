@@ -68,8 +68,8 @@ pub fn split_by_sentence_boundaries(text: &str, max_tokens: usize) -> Vec<(Strin
 
 pub fn split_by_words(text: &str, max_tokens: usize) -> Vec<(String, usize)> {
     let words: Vec<&str> = text.split_whitespace().collect();
-    let mut chunks = Vec::new();
-    let mut current_chunk = Vec::new();
+    let mut fragments = Vec::new();
+    let mut current_fragment = Vec::new();
     let mut current_len = 0;
     let mut current_tokens = 0;
     let mut exact_mode = false;
@@ -80,21 +80,21 @@ pub fn split_by_words(text: &str, max_tokens: usize) -> Vec<(String, usize)> {
     for word in words {
         let word_len = word.len();
 
-        if !exact_mode && current_len + word_len + 1 > safe_len && !current_chunk.is_empty() {
+        if !exact_mode && current_len + word_len + 1 > safe_len && !current_fragment.is_empty() {
             exact_mode = true;
-            let joined = current_chunk.join(" ");
+            let joined = current_fragment.join(" ");
             current_tokens = count_tokens(&joined);
         }
 
         if exact_mode {
             let word_tokens = count_tokens(word);
-            let separator_tokens = if current_chunk.is_empty() { 0 } else { 1 };
+            let separator_tokens = if current_fragment.is_empty() { 0 } else { 1 };
             
-            if current_tokens + separator_tokens + word_tokens > max_tokens && !current_chunk.is_empty() {
-                let joined = current_chunk.join(" ");
-                chunks.push((joined, current_tokens));
+            if current_tokens + separator_tokens + word_tokens > max_tokens && !current_fragment.is_empty() {
+                let joined = current_fragment.join(" ");
+                fragments.push((joined, current_tokens));
                 
-                current_chunk = vec![word];
+                current_fragment = vec![word];
                 current_len = word_len;
                 current_tokens = word_tokens;
                 exact_mode = false;
@@ -104,21 +104,21 @@ pub fn split_by_words(text: &str, max_tokens: usize) -> Vec<(String, usize)> {
             }
         }
 
-        current_chunk.push(word);
+        current_fragment.push(word);
         current_len += word_len + 1;
     }
 
-    if !current_chunk.is_empty() {
-        let joined = current_chunk.join(" ");
+    if !current_fragment.is_empty() {
+        let joined = current_fragment.join(" ");
         let tokens = if exact_mode { current_tokens } else { count_tokens(&joined) };
-        chunks.push((joined, tokens));
+        fragments.push((joined, tokens));
     }
-    chunks
+    fragments
 }
 
 pub fn split_oversized_paragraph(para: &str, max_tokens: usize) -> Vec<(String, usize)> {
     let lines: Vec<&str> = para.split('\n').collect();
-    let mut chunks = Vec::new();
+    let mut fragments = Vec::new();
     let mut batch = Vec::new();
     let mut batch_tokens = 0;
 
@@ -127,17 +127,17 @@ pub fn split_oversized_paragraph(para: &str, max_tokens: usize) -> Vec<(String, 
 
         if lt > max_tokens {
             if !batch.is_empty() {
-                chunks.push((batch.join("\n"), batch_tokens));
+                fragments.push((batch.join("\n"), batch_tokens));
                 batch.clear();
                 batch_tokens = 0;
             }
-            chunks.extend(split_by_sentence_boundaries(line, max_tokens));
+            fragments.extend(split_by_sentence_boundaries(line, max_tokens));
             continue;
         }
 
         let separator_tokens = if !batch.is_empty() { 1 } else { 0 };
         if batch_tokens + separator_tokens + lt > max_tokens && !batch.is_empty() {
-            chunks.push((batch.join("\n"), batch_tokens));
+            fragments.push((batch.join("\n"), batch_tokens));
             batch.clear();
             batch_tokens = 0;
         }
@@ -147,12 +147,12 @@ pub fn split_oversized_paragraph(para: &str, max_tokens: usize) -> Vec<(String, 
     }
 
     if !batch.is_empty() {
-        chunks.push((batch.join("\n"), batch_tokens));
+        fragments.push((batch.join("\n"), batch_tokens));
     }
 
-    if chunks.is_empty() {
+    if fragments.is_empty() {
         vec![(para.to_string(), count_tokens(para))]
     } else {
-        chunks
+        fragments
     }
 }

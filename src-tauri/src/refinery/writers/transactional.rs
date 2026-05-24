@@ -19,13 +19,13 @@ impl TransactionalWriter {
         }
     }
 
-    pub async fn execute_batch(&mut self, operations: Vec<WriteOperation>, source_file_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
+    pub async fn execute_batch(&mut self, operations: Vec<WriteOperation>, source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
         self.executed.clear();
         self.merge_backups.clear();
 
         for op in &operations {
             match op {
-                WriteOperation::MergeChunk { target_file, .. } => {
+                WriteOperation::MergeFragment { target_file, .. } => {
                     if let Ok(content) = fs::read_to_string(target_file).await {
                         self.merge_backups.insert(target_file.clone(), content);
                     }
@@ -38,7 +38,7 @@ impl TransactionalWriter {
                 _ => {}
             }
 
-            if let Err(e) = self.writer.execute(op, source_file_id, db_state).await {
+            if let Err(e) = self.writer.execute(op, source_note_id, db_state).await {
                 self.rollback().await;
                 return Err(e);
             }
@@ -53,7 +53,7 @@ impl TransactionalWriter {
                 WriteOperation::CreateFile { path, .. } => {
                     let _ = fs::remove_file(path).await;
                 }
-                WriteOperation::MergeChunk { target_file, .. } => {
+                WriteOperation::MergeFragment { target_file, .. } => {
                     if let Some(backup) = self.merge_backups.get(target_file) {
                         let _ = fs::write(target_file, backup).await;
                     } else {

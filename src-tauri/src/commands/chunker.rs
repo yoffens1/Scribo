@@ -1,12 +1,12 @@
 use crate::AppError;
-use crate::chunker::{ChunkOptions, types::ChunkerResult};
+use crate::fragmenter::{FragmentOptions, types::FragmenterResult};
 
 #[tauri::command]
-pub fn chunk_text_paired(content: String) -> Result<ChunkerResult, AppError> {
-    Ok(crate::chunker::chunk_paired(content, &ChunkOptions::default()))
+pub fn fragment_text_paired(content: String) -> Result<FragmenterResult, AppError> {
+    Ok(crate::fragmenter::fragment_paired(content, &FragmentOptions::default()))
 }
 
 #[tauri::command]
 pub fn count_text_tokens(text: String) -> usize {
-    crate::chunker::stages::token::count_tokens(&text)
+    crate::fragmenter::stages::token::count_tokens(&text)
 }

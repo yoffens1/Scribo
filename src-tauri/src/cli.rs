@@ -39,15 +39,15 @@ pub fn handle_cli(args: Vec<String>) {
             let title = &args[2];
             let content = &args[3];
             conn.execute(
-                "INSERT INTO files (file_path, file_name, status, updated_at) VALUES (?1, ?1, 'indexed', ?2)",
+                "INSERT INTO notes (file_path, file_name, indexing_status, indexed_at) VALUES (?1, ?1, 'indexed', ?2)",
                 (title, 12345_i64),
             ).unwrap();
-            let file_id = conn.last_insert_rowid();
+            let note_id = conn.last_insert_rowid();
             conn.execute(
-                "INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) VALUES (?, 0, ?, X'00')",
-                (file_id, content),
+                "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (?, 0, ?, X'00')",
+                (note_id, content),
             ).unwrap();
-            println!("Successfully added note: '{}' (ID: {})", title, file_id);
+            println!("Successfully added note: '{}' (ID: {})", title, note_id);
         }
         "import-dir" => {
             if args.len() < 3 {
@@ -69,92 +69,97 @@ pub fn handle_cli(args: Vec<String>) {
                     let title = path.file_name().unwrap().to_str().unwrap().to_string();
                     let content = std::fs::read_to_string(path).unwrap_or_default();
                         
-                        let chunked_result = crate::chunker::chunk_paired(content, &crate::chunker::ChunkOptions::default());
+                        let fragmented_result = crate::fragmenter::fragment_paired(content, &crate::fragmenter::FragmentOptions::default());
                         
                         let file_path_str = path.to_str().unwrap().to_string();
                         let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                         
                         tx.execute(
-                            "INSERT OR IGNORE INTO files (file_path, file_name, status, updated_at) VALUES (?1, ?2, 'indexed', ?3)",
+                            "INSERT OR IGNORE INTO notes (file_path, file_name, indexing_status, indexed_at) VALUES (?1, ?2, 'indexed', ?3)",
                             (&file_path_str, &title, timestamp),
                         ).unwrap();
                         
-                        let file_id: i64 = tx.query_row(
-                            "SELECT file_id FROM files WHERE file_path = ?1",
+                        let note_id: i64 = tx.query_row(
+                            "SELECT note_id FROM notes WHERE file_path = ?1",
                             (&file_path_str,),
                             |row| row.get(0)
                         ).unwrap();
                         
-                        tx.execute("DELETE FROM chunks WHERE file_id = ?1", (file_id,)).unwrap();
+                        tx.execute("DELETE FROM fragments WHERE note_id = ?1", (note_id,)).unwrap();
                         
-                        // Insert proper chunks
-                        for (i, pair) in chunked_result.pairs.iter().enumerate() {
+                        // Insert proper fragments
+                        for (i, pair) in fragmented_result.pairs.iter().enumerate() {
                             tx.execute(
-                                "INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, X'00')",
-                                (file_id, i as i64, &pair.generation),
+                                "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (?, ?, ?, X'00')",
+                                (note_id, i as i64, &pair.generation),
                             ).unwrap();
                         }
                         
                         tx.execute(
-                            "INSERT OR IGNORE INTO cards (file_id, state, reps, lapses, stability, difficulty)
-                             VALUES (?, 'new', 0, 0, 0.0, 0.0)",
-                            (file_id,),
+                            "INSERT OR IGNORE INTO cards (note_id) VALUES (?)",
+                            (note_id,),
+                        ).unwrap();
+                        let card_id: i64 = tx.last_insert_rowid();
+                        tx.execute(
+                            "INSERT OR IGNORE INTO schedules (target_type, target_id, state)
+                             VALUES ('card', ?, 'new')",
+                            (card_id,),
                         ).unwrap();
                         
-                        println!("Imported: {} ({} chunks)", title, chunked_result.pairs.len());
+                        println!("Imported: {} ({} fragments)", title, fragmented_result.pairs.len());
                         imported += 1;
                 }
             }
             tx.commit().unwrap();
-            println!("Successfully imported {} markdown files.", imported);
+            println!("Successfully imported {} markdown notes.", imported);
         }
-        "chunk-file" => {
+        "fragment-file" => {
             if args.len() < 3 {
-                println!("Usage: scribo chunk-file <file_path> [--embedding|--generation|--structural|--paired]");
+                println!("Usage: scribo fragment-file <file_path> [--embedding|--generation|--structural|--paired]");
                 return;
             }
             let file_path = &args[2];
             let mode = args.get(3).map(|s| s.as_str()).unwrap_or("--paired");
             let content = std::fs::read_to_string(file_path).expect("Could not read file");
-            let default_opts = crate::chunker::ChunkOptions::default();
+            let default_opts = crate::fragmenter::FragmentOptions::default();
             
             println!("File: {}", file_path);
             
             match mode {
                 "--embedding" => {
-                    let chunks = crate::chunker::chunk_for_embedding(&content, &default_opts);
-                    println!("Total Chunks (Embedding): {}", chunks.len());
-                    for (i, chunk) in chunks.iter().enumerate() {
-                        println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", crate::chunker::stages::token::count_tokens(chunk));
-                        println!("{}", chunk);
+                    let fragments = crate::fragmenter::fragment_for_embedding(&content, &default_opts);
+                    println!("Total Fragments (Embedding): {}", fragments.len());
+                    for (i, fragment) in fragments.iter().enumerate() {
+                        println!("\n================ FRAGMENT {} ================", i);
+                        println!("[Tokens: {}]", crate::fragmenter::stages::token::count_tokens(fragment));
+                        println!("{}", fragment);
                     }
                 }
                 "--generation" => {
-                    let chunks = crate::chunker::chunk_for_generation(&content, &default_opts);
-                    println!("Total Chunks (Generation): {}", chunks.len());
-                    for (i, chunk) in chunks.iter().enumerate() {
-                        println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", crate::chunker::stages::token::count_tokens(chunk));
-                        println!("{}", chunk);
+                    let fragments = crate::fragmenter::fragment_for_generation(&content, &default_opts);
+                    println!("Total Fragments (Generation): {}", fragments.len());
+                    for (i, fragment) in fragments.iter().enumerate() {
+                        println!("\n================ FRAGMENT {} ================", i);
+                        println!("[Tokens: {}]", crate::fragmenter::stages::token::count_tokens(fragment));
+                        println!("{}", fragment);
                     }
                 }
                 "--structural" => {
-                    let struct_opts = default_opts.for_mode(crate::chunker::ChunkMode::Structural);
-                    let result = crate::chunker::chunk_paired(content, &struct_opts);
-                    println!("Total Chunks (Structural): {}", result.pairs.len());
+                    let struct_opts = default_opts.for_mode(crate::fragmenter::FragmentMode::Structural);
+                    let result = crate::fragmenter::fragment_paired(content, &struct_opts);
+                    println!("Total Fragments (Structural): {}", result.pairs.len());
                     for (i, pair) in result.pairs.iter().enumerate() {
-                        println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", crate::chunker::stages::token::count_tokens(&pair.embedding));
+                        println!("\n================ FRAGMENT {} ================", i);
+                        println!("[Tokens: {}]", crate::fragmenter::stages::token::count_tokens(&pair.embedding));
                         println!("{}", pair.embedding);
                     }
                 }
                 _ => { // --paired
-                    let result = crate::chunker::chunk_paired(content, &default_opts);
-                    println!("Total Chunks (Paired): {}", result.pairs.len());
+                    let result = crate::fragmenter::fragment_paired(content, &default_opts);
+                    println!("Total Fragments (Paired): {}", result.pairs.len());
                     for (i, pair) in result.pairs.iter().enumerate() {
-                        println!("\n================ CHUNK {} ================", i);
-                        println!("[Tokens: {}]", crate::chunker::stages::token::count_tokens(&pair.generation));
+                        println!("\n================ FRAGMENT {} ================", i);
+                        println!("[Tokens: {}]", crate::fragmenter::stages::token::count_tokens(&pair.generation));
                         println!("[Embedding]:\n{}\n", pair.embedding);
                         println!("[Generation]:\n{}", pair.generation);
                     }
@@ -162,7 +167,7 @@ pub fn handle_cli(args: Vec<String>) {
             }
         }
         "list" => {
-            let mut stmt = conn.prepare("SELECT file_id, file_path FROM files WHERE is_deleted = 0").unwrap();
+            let mut stmt = conn.prepare("SELECT note_id, file_path FROM notes WHERE is_deleted = 0").unwrap();
             let rows = stmt.query_map([], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             }).unwrap();
@@ -179,11 +184,11 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let query = &args[2];
             let mut stmt = conn.prepare(
-                "SELECT c.chunk_id, f.file_path, c.chunk_text 
-                 FROM chunks_fts 
-                 JOIN chunks c ON c.chunk_id = chunks_fts.rowid
-                 JOIN files f ON f.file_id = c.file_id
-                 WHERE chunks_fts MATCH ? LIMIT 5"
+                "SELECT c.fragment_id, f.file_path, c.text 
+                 FROM fragments_fts 
+                 JOIN fragments c ON c.fragment_id = fragments_fts.rowid
+                 JOIN notes f ON f.note_id = c.note_id
+                 WHERE fragments_fts MATCH ? LIMIT 5"
             ).unwrap();
             let rows = stmt.query_map([query], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
@@ -191,11 +196,11 @@ pub fn handle_cli(args: Vec<String>) {
             println!("Search results for '{}':", query);
             for row in rows {
                 let (id, file, text) = row.unwrap();
-                println!("-> {} (Chunk ID: {})\n   \"{}\"\n", file, id, text.trim());
+                println!("-> {} (Fragment ID: {})\n   \"{}\"\n", file, id, text.trim());
             }
         }
         _ => {
-            println!("Unknown command. Available commands: add, list, search, import-dir, chunk-file");
+            println!("Unknown command. Available commands: add, list, search, import-dir, fragment-file");
         }
     }
 }

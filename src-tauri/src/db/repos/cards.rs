@@ -8,11 +8,11 @@ use crate::domain::card::{CardReviewParams, ReviewResult};
 
 
 
-pub fn insert_ignore(conn: &Connection, file_id: i64) -> Result<(), AppError> {
+pub fn insert_ignore(conn: &Connection, note_id: i64) -> Result<(), AppError> {
     conn.execute(
-        "INSERT OR IGNORE INTO cards (file_id, state, reps, lapses, stability, difficulty)
+        "INSERT OR IGNORE INTO cards (note_id, state, reps, lapses, stability, difficulty)
          VALUES (?, 'new', 0, 0, 0.0, 0.0)",
-        rusqlite::params![file_id],
+        rusqlite::params![note_id],
     )?;
     Ok(())
 }
@@ -25,7 +25,7 @@ pub fn review_fsrs(
     let tx = conn.transaction()?;
 
     let (mut reps, mut lapses, stability, difficulty, last_reviewed, state_str) = tx.query_row(
-        "SELECT reps, lapses, stability, difficulty, last_reviewed, state FROM cards WHERE card_id = ?",
+        "SELECT reps, lapses, stability, difficulty, last_reviewed, state FROM schedules WHERE target_type = 'card' AND target_id = ?",
         rusqlite::params![params.card_id],
         |row| {
             Ok((
@@ -76,7 +76,7 @@ pub fn review_fsrs(
     let updated_state_str = if state_str == "new" { "learning" } else { "review" };
 
     tx.execute(
-        "UPDATE cards SET 
+        "UPDATE schedules SET 
             state = ?, 
             reps = ?, 
             lapses = ?,
@@ -84,7 +84,7 @@ pub fn review_fsrs(
             difficulty = ?,
             next_review = ?, 
             last_reviewed = ? 
-         WHERE card_id = ?",
+         WHERE target_type = 'card' AND target_id = ?",
         rusqlite::params![
             updated_state_str,
             reps,
@@ -105,7 +105,8 @@ pub fn review_fsrs(
     tx.commit()?;
 
     Ok(ReviewResult {
-        scheduled_days,
+        success: true,
+        scheduled_days: scheduled_days as i64,
         next_review,
     })
 }

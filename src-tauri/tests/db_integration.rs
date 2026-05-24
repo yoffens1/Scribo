@@ -3,7 +3,7 @@ mod tests {
     use scribo_lib::db::schema::initialize_schema;
     use scribo_lib::db::repos::cards::review_fsrs;
     use scribo_lib::domain::card::CardReviewParams;
-    use scribo_lib::db::repos::files::update_content_with_diff;
+    use scribo_lib::db::repos::notes::update_content_with_diff;
     use scribo_lib::retrieval::{retrieve, fetch, RetrievalConfig, RetrieveOptions, FetchQuery};
     use scribo_lib::DbState;
     use parking_lot::{Mutex, RwLock};
@@ -29,11 +29,15 @@ mod tests {
 
         db_state.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO files (file_id, file_path, file_name, status) VALUES (1, 'note.md', 'note.md', 'indexed')",
+                "INSERT INTO notes (note_id, file_path, file_name, indexing_status) VALUES (1, 'note.md', 'note.md', 'indexed')",
                 [],
             ).unwrap();
             conn.execute(
-                "INSERT INTO cards (card_id, file_id, state) VALUES (1, 1, 'new')",
+                "INSERT INTO cards (card_id, note_id) VALUES (1, 1)",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, state) VALUES ('card', 1, 'new')",
                 [],
             ).unwrap();
             Ok(())
@@ -46,13 +50,13 @@ mod tests {
 
         db_state.with_conn(|conn| {
             let result = review_fsrs(conn, params).unwrap();
-            assert!(result.scheduled_days > 0.0);
+            assert!(result.scheduled_days > 0);
             assert!(result.next_review > 0);
             Ok(())
         }).unwrap();
 
         db_state.with_conn(|conn| {
-            let state: String = conn.query_row("SELECT state FROM cards WHERE card_id = 1", [], |r| r.get(0)).unwrap();
+            let state: String = conn.query_row("SELECT state FROM schedules WHERE target_type = 'card' AND target_id = 1", [], |r| r.get(0)).unwrap();
             assert_eq!(state, "learning");
 
             let log_count: i64 = conn.query_row("SELECT COUNT(*) FROM review_logs WHERE card_id = 1", [], |r| r.get(0)).unwrap();
@@ -66,9 +70,9 @@ mod tests {
         let db_state = setup_test_db();
 
         db_state.with_conn(|conn| {
-            conn.execute("INSERT INTO files (file_id, file_path, file_name) VALUES (1, 'a.md', 'a.md')", []).unwrap();
+            conn.execute("INSERT INTO notes (note_id, file_path, file_name) VALUES (1, 'a.md', 'a.md')", []).unwrap();
             conn.execute(
-                "INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) VALUES (1, 0, 'Line one of text', X'00')",
+                "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (1, 0, 'Line one of text', X'00')",
                 [],
             ).unwrap();
             Ok(())
@@ -81,7 +85,7 @@ mod tests {
         }).unwrap();
 
         db_state.with_conn(|conn| {
-            let patch: String = conn.query_row("SELECT patch FROM files_history WHERE file_id = 1", [], |r| r.get(0)).unwrap();
+            let patch: String = conn.query_row("SELECT patch FROM note_revisions WHERE note_id = 1", [], |r| r.get(0)).unwrap();
             assert!(patch.contains("+Line two is added"));
             Ok(())
         }).unwrap();
@@ -92,13 +96,13 @@ mod tests {
         let db_state = setup_test_db();
 
         db_state.with_conn(|conn| {
-            conn.execute("INSERT INTO files (file_id, file_path, file_name) VALUES (1, 'doc.md', 'doc.md')", []).unwrap();
+            conn.execute("INSERT INTO notes (note_id, file_path, file_name) VALUES (1, 'doc.md', 'doc.md')", []).unwrap();
             conn.execute(
-                "INSERT INTO chunks (file_id, chunk_index, chunk_text, token_count, embedding) VALUES (1, 0, 'This is a note about neural networks and machine learning.', 10, X'0000803f')",
+                "INSERT INTO fragments (note_id, fragment_index, text, token_count, embedding) VALUES (1, 0, 'This is a note about neural networks and machine learning.', 10, X'0000803f')",
                 [],
             ).unwrap();
             conn.execute(
-                "INSERT INTO chunks (file_id, chunk_index, chunk_text, token_count, embedding) VALUES (1, 1, 'Obsidian is a great tool for personal knowledge management.', 9, X'0000803f')",
+                "INSERT INTO fragments (note_id, fragment_index, text, token_count, embedding) VALUES (1, 1, 'Obsidian is a great tool for personal knowledge management.', 9, X'0000803f')",
                 [],
             ).unwrap();
             Ok(())
@@ -115,7 +119,7 @@ mod tests {
         let fetch_res = fetch(&db_state, &fetch_query).unwrap();
         assert_eq!(fetch_res.len(), 2);
         assert_eq!(fetch_res[0].file_path, "doc.md");
-        assert_eq!(fetch_res[0].chunk_index, 0);
+        assert_eq!(fetch_res[0].fragment_index, 0);
 
         // 2. Test Retrieve (Keyword mode)
         let config = RetrievalConfig {
@@ -133,7 +137,7 @@ mod tests {
 
         let query_res = retrieve(&db_state, "knowledge management", None, &config, &options).await.unwrap();
         assert_eq!(query_res.len(), 1);
-        assert_eq!(query_res[0].chunk_ref.file_path, "doc.md");
-        assert_eq!(query_res[0].chunk_ref.chunk_index, 1);
+        assert_eq!(query_res[0].fragment_ref.file_path, "doc.md");
+        assert_eq!(query_res[0].fragment_ref.fragment_index, 1);
     }
 }

@@ -8,13 +8,13 @@ pub enum IndexCommand {
     IndexFile {
         file_path: String,
         content: String,
-        chunking_version: String,
+        fragmenting_version: String,
         // Model used for embeddings
         model: String,
     },
     IndexDirectory {
         dir_path: PathBuf,
-        chunking_version: String,
+        fragmenting_version: String,
         model: String,
     },
     Shutdown,
@@ -36,7 +36,7 @@ impl ReindexScheduler {
         tauri::async_runtime::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    IndexCommand::IndexFile { file_path, content, chunking_version, model } => {
+                    IndexCommand::IndexFile { file_path, content, fragmenting_version, model } => {
                         println!("Processing indexing for: {}", file_path);
                         
                         let pool_guard = pool_clone.read();
@@ -49,7 +49,7 @@ impl ReindexScheduler {
                                     &file_path,
                                     &hash,
                                     &model,
-                                    &chunking_version,
+                                    &fragmenting_version,
                                     None
                                 );
 
@@ -68,8 +68,8 @@ impl ReindexScheduler {
                                             mtime: None,
                                             embedding_model: &model,
                                             embedding_dim: 1536,
-                                            chunking_version: &chunking_version,
-                                            chunks: vec![], // TODO: generate via chunker and LLM
+                                            fragmenting_version: &fragmenting_version,
+                                            fragments: vec![], // TODO: generate via fragmenter and LLM
                                         };
                                         
                                         if let Err(e) = crate::services::indexer::persist_indexed_file(&mut conn, payload) {
@@ -82,9 +82,9 @@ impl ReindexScheduler {
                             }
                         }
                     }
-                    IndexCommand::IndexDirectory { dir_path, chunking_version: _, model: _ } => {
+                    IndexCommand::IndexDirectory { dir_path, fragmenting_version: _, model: _ } => {
                         println!("Scanning directory for indexing: {:?}", dir_path);
-                        // TODO: Recursively queue files
+                        // TODO: Recursively queue notes
                     }
                     IndexCommand::Shutdown => break,
                 }
@@ -94,11 +94,11 @@ impl ReindexScheduler {
         Self { sender: tx_clone }
     }
 
-    pub async fn enqueue_file(&self, file_path: String, content: String, chunking_version: String, model: String) {
+    pub async fn enqueue_file(&self, file_path: String, content: String, fragmenting_version: String, model: String) {
         let _ = self.sender.send(IndexCommand::IndexFile {
             file_path,
             content,
-            chunking_version,
+            fragmenting_version,
             model,
         }).await;
     }

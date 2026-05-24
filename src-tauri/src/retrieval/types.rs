@@ -32,15 +32,15 @@ pub struct RetrievalConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChunkRef {
+pub struct FragmentRef {
     pub file_path: String,
-    pub chunk_index: usize,
+    pub fragment_index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
-    pub chunk_ref: ChunkRef,
+    pub fragment_ref: FragmentRef,
     pub score: f32,
     pub text: Option<String>,
 }
@@ -72,10 +72,10 @@ pub struct FetchQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchResult {
-    pub chunk_id: Option<i64>,
+    pub fragment_id: Option<i64>,
     pub file_path: String,
-    pub chunk_index: usize,
-    pub chunk_text: Option<String>,
+    pub fragment_index: usize,
+    pub fragment_text: Option<String>,
     pub token_count: Option<i64>,
     #[serde(with = "serde_bytes")]
     pub embedding: Vec<u8>,

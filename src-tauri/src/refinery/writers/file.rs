@@ -24,22 +24,22 @@ impl FileWriter {
         Self { ctx }
     }
 
-    pub async fn execute(&self, op: &WriteOperation, source_file_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
+    pub async fn execute(&self, op: &WriteOperation, source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
         match op {
             WriteOperation::CreateFile { path, content } => {
                 if let Some(parent) = Path::new(path).parent() {
                     fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
                 fs::write(path, content).await.map_err(|e| e.to_string())?;
-                self.sync_database(path, content, source_file_id, db_state).await?;
+                self.sync_database(path, content, source_note_id, db_state).await?;
             }
-            WriteOperation::MergeChunk { source_file: _, target_file, chunk_text } => {
-                let merged_content = self.merge_card_content(target_file, chunk_text).await?;
+            WriteOperation::MergeFragment { source_file: _, target_file, fragment_text } => {
+                let merged_content = self.merge_card_content(target_file, fragment_text).await?;
                 if let Some(parent) = Path::new(target_file).parent() {
                     fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
                 fs::write(target_file, &merged_content).await.map_err(|e| e.to_string())?;
-                self.sync_database(target_file, &merged_content, source_file_id, db_state).await?;
+                self.sync_database(target_file, &merged_content, source_note_id, db_state).await?;
             }
             WriteOperation::CreateFolder { path } => {
                 fs::create_dir_all(path).await.map_err(|e| e.to_string())?;
@@ -51,7 +51,7 @@ impl FileWriter {
                 fs::rename(from, to).await.map_err(|e| e.to_string())?;
                 if let Some(state) = db_state {
                     let _ = state.with_conn(|conn| {
-                        conn.execute("UPDATE files SET file_path = ? WHERE file_path = ?", [to, from])?;
+                        conn.execute("UPDATE notes SET file_path = ? WHERE file_path = ?", [to, from])?;
                         Ok(())
                     });
                 }
@@ -61,9 +61,9 @@ impl FileWriter {
                 if let Some(state) = db_state {
                     let _ = state.with_conn(|conn| {
                         if self.ctx.delete_from_db_on_gc {
-                            conn.execute("DELETE FROM files WHERE file_path = ?", [path])?;
+                            conn.execute("DELETE FROM notes WHERE file_path = ?", [path])?;
                         } else {
-                            conn.execute("UPDATE files SET is_deleted = 1 WHERE file_path = ?", [path])?;
+                            conn.execute("UPDATE notes SET is_deleted = 1 WHERE file_path = ?", [path])?;
                         }
                         Ok(())
                     });
@@ -181,7 +181,7 @@ impl FileWriter {
         Vec::new()
     }
 
-    async fn sync_database(&self, file_path: &str, content: &str, source_file_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
+    async fn sync_database(&self, file_path: &str, content: &str, source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
         if let Some(state) = db_state {
             let file_hash = compute_file_hash(content);
             let file_name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -190,26 +190,26 @@ impl FileWriter {
             let file_path_clone = file_path.to_string();
 
             let _ = state.with_conn(move |conn| {
-                let mut stmt = conn.prepare("SELECT file_id FROM files WHERE file_path = ?")?;
+                let mut stmt = conn.prepare("SELECT note_id FROM notes WHERE file_path = ?")?;
                 let mut rows = stmt.query([&file_path_clone])?;
-                let file_id = if let Some(row) = rows.next()? {
+                let note_id = if let Some(row) = rows.next()? {
                     let id: i64 = row.get(0)?;
                     conn.execute(
-                        "UPDATE files SET file_hash = ?, file_mtime = ?, source_file_id = ?, is_deleted = 0, status = 'indexed', updated_at = ? WHERE file_id = ?",
-                        (&file_hash, mtime, source_file_id, mtime, id)
+                        "UPDATE notes SET file_hash = ?, file_mtime = ?, source_note_id = ?, is_deleted = 0, status = 'indexed', updated_at = ? WHERE note_id = ?",
+                        (&file_hash, mtime, source_note_id, mtime, id)
                     )?;
                     id
                 } else {
                     conn.execute(
-                        "INSERT INTO files (file_path, file_name, file_hash, file_mtime, source_file_id, is_deleted, status, updated_at) VALUES (?, ?, ?, ?, ?, 0, 'indexed', ?)",
-                        (&file_path_clone, &file_name, &file_hash, mtime, source_file_id, mtime)
+                        "INSERT INTO notes (file_path, file_name, file_hash, file_mtime, source_note_id, is_deleted, status, updated_at) VALUES (?, ?, ?, ?, ?, 0, 'indexed', ?)",
+                        (&file_path_clone, &file_name, &file_hash, mtime, source_note_id, mtime)
                     )?;
                     conn.last_insert_rowid()
                 };
 
                 conn.execute(
-                    "INSERT OR IGNORE INTO cards (file_id, state, reps, interval_days, ease_factor) VALUES (?, 'new', 0, 0, 2.5)",
-                    [file_id]
+                    "INSERT OR IGNORE INTO cards (note_id, state, reps, interval_days, ease_factor) VALUES (?, 'new', 0, 0, 2.5)",
+                    [note_id]
                 )?;
                 Ok(())
             });

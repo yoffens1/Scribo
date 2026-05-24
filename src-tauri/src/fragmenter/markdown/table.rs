@@ -1,6 +1,6 @@
 use regex::Regex;
-use crate::chunker::types::TableInfo;
-use crate::chunker::stages::token::count_tokens;
+use crate::fragmenter::types::TableInfo;
+use crate::fragmenter::stages::token::count_tokens;
 use std::sync::LazyLock;
 
 static RE_SEP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\|[-:\s]*---").unwrap());

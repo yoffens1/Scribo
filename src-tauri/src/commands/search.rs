@@ -1,4 +1,4 @@
-use crate::services::filesearch::{FuzzySearch, SearchHit};
+use crate::services::notesearch::{FuzzySearch, SearchHit};
 use crate::ai::{LlmConfig, LlmService, Translator};
 use crate::retrieval::{detect_language, is_english, retrieve, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
 use crate::error::AppError;
@@ -22,14 +22,14 @@ pub async fn retrieval_query(
 }
 
 #[tauri::command]
-pub async fn filesearch_fuzzy(
+pub async fn notesearch_fuzzy(
     query: String,
-    files: Vec<String>,
+    notes: Vec<String>,
     limit: usize,
 ) -> Result<Vec<SearchHit>, AppError> {
-    // Note: instantiating FuzzySearch on every request might be slightly slow if `files` is huge,
+    // Note: instantiating FuzzySearch on every request might be slightly slow if `notes` is huge,
     // but for now this perfectly matches the TS implementation.
-    let search = FuzzySearch::new(files);
+    let search = FuzzySearch::new(notes);
     let results = search.search(&query, limit);
     Ok(results)
 }

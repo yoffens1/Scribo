@@ -1,10 +1,10 @@
-use crate::refinery::types::{AtomChunk, ProposedTaxonomy, PlacementPlan};
+use crate::refinery::types::{AtomFragment, ProposedTaxonomy, PlacementPlan};
 use crate::ai::LlmService;
-use crate::ai::prompts::{build_placement_prompt, ChunkForTaxonomy};
+use crate::ai::prompts::{build_placement_prompt, FragmentForTaxonomy};
 use std::sync::Arc;
 
-pub async fn run_placement_stage(chunks: &[AtomChunk], taxonomy: &ProposedTaxonomy, llm: Arc<LlmService>) -> PlacementPlan {
-    let taxonomy_chunks: Vec<ChunkForTaxonomy> = chunks.iter().map(|c| ChunkForTaxonomy {
+pub async fn run_placement_stage(fragments: &[AtomFragment], taxonomy: &ProposedTaxonomy, llm: Arc<LlmService>) -> PlacementPlan {
+    let taxonomy_fragments: Vec<FragmentForTaxonomy> = fragments.iter().map(|c| FragmentForTaxonomy {
         hash: &c.hash,
         text: &c.generation_text,
         source_path: &c.source_path,
@@ -16,7 +16,7 @@ pub async fn run_placement_stage(chunks: &[AtomChunk], taxonomy: &ProposedTaxono
     let messages = build_placement_prompt(
         &proposed_tree_str,
         existing_tree,
-        &taxonomy_chunks
+        &taxonomy_fragments
     );
 
     if let Ok(response) = llm.generate_messages(messages).await {

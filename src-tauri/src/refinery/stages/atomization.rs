@@ -1,21 +1,21 @@
-use crate::refinery::types::AtomChunk;
+use crate::refinery::types::AtomFragment;
 use crate::ai::LlmService;
 use crate::ai::prompts::build_atomize_prompt;
 use std::sync::Arc;
 use futures::stream::{self, StreamExt};
 
-pub async fn run_atomization_stage(chunks: Vec<AtomChunk>, llm: Arc<LlmService>) -> Vec<AtomChunk> {
+pub async fn run_atomization_stage(fragments: Vec<AtomFragment>, llm: Arc<LlmService>) -> Vec<AtomFragment> {
     let concurrency_limit = 5;
     
-    let processed = stream::iter(chunks)
-        .map(|mut chunk| {
+    let processed = stream::iter(fragments)
+        .map(|mut fragment| {
             let llm = Arc::clone(&llm);
             async move {
-                if chunk.generation_text.len() < 30 {
-                    return chunk;
+                if fragment.generation_text.len() < 30 {
+                    return fragment;
                 }
                 
-                let messages = build_atomize_prompt(&chunk.generation_text, &chunk.source_path);
+                let messages = build_atomize_prompt(&fragment.generation_text, &fragment.source_path);
                 if let Ok(response) = llm.generate_messages(messages).await {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response.text) {
                         if let Some(heading) = parsed.get("questionHeading").and_then(|v| v.as_str()) {
@@ -23,7 +23,7 @@ pub async fn run_atomization_stage(chunks: Vec<AtomChunk>, llm: Arc<LlmService>)
                             if !h.starts_with("## ") {
                                 h = format!("## {}", h.trim_start_matches('#').trim_start());
                             }
-                            chunk.question_heading = Some(h);
+                            fragment.question_heading = Some(h);
                         }
                         if let Some(filename) = parsed.get("filename").and_then(|v| v.as_str()) {
                             let mut f = filename.trim().to_string();
@@ -31,11 +31,11 @@ pub async fn run_atomization_stage(chunks: Vec<AtomChunk>, llm: Arc<LlmService>)
                             if !f.ends_with(".md") {
                                 f.push_str(".md");
                             }
-                            chunk.filename = Some(f);
+                            fragment.filename = Some(f);
                         }
                     }
                 }
-                chunk
+                fragment
             }
         })
         .buffer_unordered(concurrency_limit)

@@ -1,15 +1,15 @@
-use crate::refinery::types::AtomChunk;
+use crate::refinery::types::AtomFragment;
 use crate::db::hash::compute_file_hash;
-use crate::chunker::{chunk_paired, ChunkOptions};
+use crate::fragmenter::{fragment_paired, FragmentOptions};
 
-pub async fn run_chunking_stage(content: &str, source_path: &str) -> Vec<AtomChunk> {
-    let opts = ChunkOptions::default();
-    let chunked = chunk_paired(content.to_string(), &opts);
+pub async fn run_fragmenting_stage(content: &str, source_path: &str) -> Vec<AtomFragment> {
+    let opts = FragmentOptions::default();
+    let fragmented = fragment_paired(content.to_string(), &opts);
     
     let mut results = Vec::new();
-    for (i, pair) in chunked.pairs.into_iter().enumerate() {
+    for (i, pair) in fragmented.pairs.into_iter().enumerate() {
         let hash = compute_file_hash(&pair.embedding);
-        results.push(AtomChunk {
+        results.push(AtomFragment {
             sources: vec![],
             hash,
             embedding_text: pair.embedding.clone(),

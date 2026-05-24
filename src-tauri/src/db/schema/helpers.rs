@@ -17,9 +17,10 @@ pub fn check_integrity(conn: &Connection) -> Result<(), AppError> {
 }
 
 pub fn recover_interrupted(conn: &Connection) -> Result<(), AppError> {
+    // Note: this runs AFTER migrations, so it must use the v10 schema names.
     conn.execute_batch(
-        "DELETE FROM chunks WHERE file_id IN (SELECT file_id FROM files WHERE status = 'indexing');
-         UPDATE files SET status = 'failed', last_error = 'Interrupted indexing' WHERE status = 'indexing';"
+        "DELETE FROM fragments WHERE note_id IN (SELECT note_id FROM notes WHERE indexing_status = 'indexing');
+         UPDATE notes SET indexing_status = 'failed', indexing_error = 'Interrupted indexing' WHERE indexing_status = 'indexing';"
     )?;
     Ok(())
 }

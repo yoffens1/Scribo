@@ -1,21 +1,21 @@
-use crate::refinery::types::AtomChunk;
+use crate::refinery::types::AtomFragment;
 
-pub async fn run_subsplit_stage(chunks: Vec<AtomChunk>) -> Vec<AtomChunk> {
+pub async fn run_subsplit_stage(fragments: Vec<AtomFragment>) -> Vec<AtomFragment> {
     let mut result = Vec::new();
     let max_limit = 1000;
     
-    for chunk in chunks {
+    for fragment in fragments {
         // Approximate token count
-        let tokens = chunk.generation_text.split_whitespace().count() * 4 / 3;
+        let tokens = fragment.generation_text.split_whitespace().count() * 4 / 3;
         
         if tokens <= max_limit {
-            result.push(chunk);
+            result.push(fragment);
             continue;
         }
 
-        let sentences: Vec<&str> = chunk.generation_text.split_terminator(|c| c == '.' || c == '!' || c == '?').collect();
+        let sentences: Vec<&str> = fragment.generation_text.split_terminator(|c| c == '.' || c == '!' || c == '?').collect();
         if sentences.len() <= 1 {
-            result.push(chunk);
+            result.push(fragment);
             continue;
         }
 
@@ -30,12 +30,12 @@ pub async fn run_subsplit_stage(chunks: Vec<AtomChunk>) -> Vec<AtomChunk> {
 
             if current_tokens + s_tokens > max_limit && !current_sentences.is_empty() {
                 let split_text = current_sentences.join(" ") + ".";
-                let mut new_chunk = chunk.clone();
-                new_chunk.hash = format!("{}-s{}", chunk.hash, part);
-                new_chunk.embedding_text = split_text.clone();
-                new_chunk.generation_text = split_text;
-                new_chunk.index = chunk.index + part;
-                result.push(new_chunk);
+                let mut new_fragment = fragment.clone();
+                new_fragment.hash = format!("{}-s{}", fragment.hash, part);
+                new_fragment.embedding_text = split_text.clone();
+                new_fragment.generation_text = split_text;
+                new_fragment.index = fragment.index + part;
+                result.push(new_fragment);
                 
                 part += 1;
                 current_sentences = vec![sentence];
@@ -48,12 +48,12 @@ pub async fn run_subsplit_stage(chunks: Vec<AtomChunk>) -> Vec<AtomChunk> {
 
         if !current_sentences.is_empty() {
             let split_text = current_sentences.join(" ") + ".";
-            let mut new_chunk = chunk.clone();
-            new_chunk.hash = format!("{}-s{}", chunk.hash, part);
-            new_chunk.embedding_text = split_text.clone();
-            new_chunk.generation_text = split_text;
-            new_chunk.index = chunk.index + part;
-            result.push(new_chunk);
+            let mut new_fragment = fragment.clone();
+            new_fragment.hash = format!("{}-s{}", fragment.hash, part);
+            new_fragment.embedding_text = split_text.clone();
+            new_fragment.generation_text = split_text;
+            new_fragment.index = fragment.index + part;
+            result.push(new_fragment);
         }
     }
     result

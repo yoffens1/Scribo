@@ -1,4 +1,4 @@
-pub mod chunking;
+pub mod fragmenting;
 pub mod subsplit;
 pub mod consolidation;
 pub mod deduplication;
@@ -8,7 +8,7 @@ pub mod taxonomy;
 pub mod placement;
 pub mod write;
 
-pub use chunking::run_chunking_stage;
+pub use fragmenting::run_fragmenting_stage;
 pub use subsplit::run_subsplit_stage;
 pub use consolidation::run_consolidation_stage;
 pub use deduplication::run_deduplication_stage;

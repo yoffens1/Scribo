@@ -10,21 +10,21 @@ pub struct SearchHit {
 
 pub struct FuzzySearch {
     matcher: SkimMatcherV2,
-    files: Vec<String>,
+    notes: Vec<String>,
 }
 
 impl FuzzySearch {
-    pub fn new(files: Vec<String>) -> Self {
+    pub fn new(notes: Vec<String>) -> Self {
         Self {
             matcher: SkimMatcherV2::default(),
-            files,
+            notes,
         }
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchHit> {
         let mut results = Vec::new();
 
-        for file_path in &self.files {
+        for file_path in &self.notes {
             if let Some(score) = self.matcher.fuzzy_match(file_path, query) {
                 results.push(SearchHit {
                     file_path: file_path.clone(),

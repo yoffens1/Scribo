@@ -3,7 +3,7 @@ use crate::AppError;
 
 pub struct ValidationResult {
     pub should_index: bool,
-    pub existing_file_id: Option<i64>,
+    pub existing_note_id: Option<i64>,
 }
 
 pub fn check_needs_indexing(
@@ -11,12 +11,12 @@ pub fn check_needs_indexing(
     file_path: &str,
     file_hash: &str,
     embedding_model: &str,
-    chunking_version: &str,
+    fragmenting_version: &str,
     file_mtime: Option<i64>,
 ) -> Result<ValidationResult, AppError> {
     let query = "
-        SELECT file_id, file_hash, embedding_model, chunking_version, status, mtime
-        FROM files
+        SELECT note_id, file_hash, embedding_model, fragmenting_version, status, mtime
+        FROM notes
         WHERE file_path = ?1 AND is_deleted = 0
     ";
 
@@ -32,27 +32,27 @@ pub fn check_needs_indexing(
     }).optional().map_err(|e| AppError::Other(e.to_string()))?;
 
     match row {
-        Some((file_id, db_hash, db_model, db_chunk_ver, status, db_mtime)) => {
+        Some((note_id, db_hash, db_model, db_fragment_ver, status, db_mtime)) => {
             if status.as_deref() == Some("failed") {
-                return Ok(ValidationResult { should_index: true, existing_file_id: Some(file_id) });
+                return Ok(ValidationResult { should_index: true, existing_note_id: Some(note_id) });
             }
 
             // Fast path: mtime match
             if let (Some(mtime), Some(db_m)) = (file_mtime, db_mtime) {
-                if mtime == db_m && db_hash.as_deref() == Some(file_hash) && db_model.as_deref() == Some(embedding_model) && db_chunk_ver.as_deref() == Some(chunking_version) {
-                    return Ok(ValidationResult { should_index: false, existing_file_id: Some(file_id) });
+                if mtime == db_m && db_hash.as_deref() == Some(file_hash) && db_model.as_deref() == Some(embedding_model) && db_fragment_ver.as_deref() == Some(fragmenting_version) {
+                    return Ok(ValidationResult { should_index: false, existing_note_id: Some(note_id) });
                 }
             }
 
             // Fallback: check actual changes
-            if db_hash.as_deref() == Some(file_hash) && db_model.as_deref() == Some(embedding_model) && db_chunk_ver.as_deref() == Some(chunking_version) {
-                return Ok(ValidationResult { should_index: false, existing_file_id: Some(file_id) });
+            if db_hash.as_deref() == Some(file_hash) && db_model.as_deref() == Some(embedding_model) && db_fragment_ver.as_deref() == Some(fragmenting_version) {
+                return Ok(ValidationResult { should_index: false, existing_note_id: Some(note_id) });
             }
 
-            Ok(ValidationResult { should_index: true, existing_file_id: Some(file_id) })
+            Ok(ValidationResult { should_index: true, existing_note_id: Some(note_id) })
         }
         None => {
-            Ok(ValidationResult { should_index: true, existing_file_id: None })
+            Ok(ValidationResult { should_index: true, existing_note_id: None })
         }
     }
 }
