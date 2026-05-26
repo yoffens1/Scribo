@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::AppError;
 
-pub fn create_all_v11(conn: &Connection) -> Result<(), AppError> {
+pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,

@@ -1,6 +1,5 @@
 pub mod helpers;
 pub mod tables;
-pub mod migrations;
 
 use rusqlite::Connection;
 use crate::error::AppError;
@@ -20,23 +19,29 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v11");
-        tables::create_all_v11(conn)?;
-        migrations::set_schema_version(conn, 11)?;
+        println!("Init: fresh database, creating all tables directly at v1");
+        tables::create_schema(conn)?;
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '1')",
+            [],
+        )?;
     } else {
-        // Существующая БД — считываем версию и применяем миграции поэтапно.
-        let current_version = migrations::get_schema_version(conn)?;
-        println!("Init: existing database, apply_migrations from {}", current_version);
-        migrations::apply_migrations(conn, current_version)?;
+        // Существующая БД — проверяем версию.
+        let version: String = conn.query_row(
+            "SELECT value FROM meta WHERE key = 'schema_version'",
+            [],
+            |r| r.get(0)
+        )?;
+        if version != "1" {
+            return Err(AppError::Other(format!(
+                "Unsupported database version: got {}, expected 1", version
+            )));
+        }
     }
 
-    // 4. Восстанавливаем прерванные задачи индексации
+    // 2. Восстанавливаем прерванные задачи индексации
     println!("Init: recover_interrupted");
     helpers::recover_interrupted(conn)?;
-
-    // 5. Выполняем заполнение данных (title и content) после миграции
-    println!("Init: backfill_notes_after_migration");
-    helpers::backfill_notes_after_migration(conn)?;
 
     Ok(())
 }
