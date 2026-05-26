@@ -1,6 +1,38 @@
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::AppError;
-use crate::domain::note::{Note, UpsertIndexingParams, InsertFailedParams, FileQueryRecord};
+use crate::domain::note::Note;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpsertIndexingParams {
+    pub clean_path: String,
+    pub file_name: String,
+    pub file_hash: String,
+    pub file_mtime: i64,
+    pub embedding_model: String,
+    pub embedding_dim: i64,
+    pub indexing_version: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InsertFailedParams {
+    pub clean_path: String,
+    pub file_name: String,
+    pub file_hash: String,
+    pub file_mtime: i64,
+    pub error: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FileQueryRecord {
+    pub file_id: i64,
+    pub file_path: String,
+    pub is_deleted: i32,
+    pub file_mtime: Option<i64>,
+    pub embedding_model: Option<String>,
+    pub indexing_version: Option<String>,
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -13,35 +45,35 @@ fn now_ms() -> i64 {
 
 pub fn get_by_path(conn: &Connection, path: &str) -> Result<Option<Note>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT note_id, file_hash, is_deleted, embedding_model, chunking_version, file_mtime
+        "SELECT note_id, file_hash, is_deleted, embedding_model, indexing_version, file_mtime
          FROM notes WHERE file_path = ?",
     )?;
     let record = stmt
-        .query_row([path], |row| {
-            Ok(Note {
-                id: crate::domain::note::NoteId(row.get(0)?),
-                title: String::new(),
-                content: String::new(),
-                tags: None,
-                file_path: Some(path.to_string()),
-                file_name: None,
-                file_hash: row.get(1)?,
-                file_mtime: row.get(5)?,
-                indexing_status: crate::domain::note::IndexingStatus::Indexed,
-                indexing_error: None,
-                indexed_at: None,
-                embedding_model: row.get(3)?,
-                embedding_dimension: None,
-                fragmenting_version: row.get(4)?,
-                is_archived: false,
-                is_deleted: row.get::<_, i64>(2).unwrap_or(0) != 0,
-                created_at: 0,
-                updated_at: 0,
-            })
-        })
-        .optional()?;
-    Ok(record)
-}
+         .query_row([path], |row| {
+             Ok(Note {
+                 id: crate::domain::note::NoteId(row.get(0)?),
+                 title: String::new(),
+                 content: String::new(),
+                 tags: None,
+                 file_path: Some(path.to_string()),
+                 file_name: None,
+                 file_hash: row.get(1)?,
+                 file_mtime: row.get(5)?,
+                 indexing_status: crate::domain::note::IndexingStatus::Indexed,
+                 indexing_error: None,
+                 indexed_at: None,
+                 embedding_model: row.get(3)?,
+                 embedding_dimension: None,
+                 indexing_version: row.get(4)?,
+                 is_archived: false,
+                 is_deleted: row.get::<_, i64>(2).unwrap_or(0) != 0,
+                 created_at: 0,
+                 updated_at: 0,
+             })
+         })
+         .optional()?;
+     Ok(record)
+ }
 
 
 
@@ -49,8 +81,8 @@ pub fn upsert_indexing(conn: &mut Connection, params: UpsertIndexingParams) -> R
     let note_id: i64 = conn.query_row(
         "INSERT INTO notes (
             file_path, file_name, file_hash, file_mtime,
-            embedding_model, embedding_dimension, fragmenting_version,
-            status, is_deleted, updated_at
+            embedding_model, embedding_dimension, indexing_version,
+            indexing_status, is_deleted, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'indexing', 0, ?)
          ON CONFLICT(file_path) DO UPDATE SET
             file_name       = excluded.file_name,
@@ -58,8 +90,8 @@ pub fn upsert_indexing(conn: &mut Connection, params: UpsertIndexingParams) -> R
             file_mtime      = excluded.file_mtime,
             embedding_model = excluded.embedding_model,
             embedding_dimension = excluded.embedding_dimension,
-            fragmenting_version = excluded.fragmenting_version,
-            status          = 'indexing',
+            indexing_version = excluded.indexing_version,
+            indexing_status          = 'indexing',
             is_deleted      = 0,
             updated_at      = excluded.updated_at
          RETURNING note_id",
@@ -70,7 +102,7 @@ pub fn upsert_indexing(conn: &mut Connection, params: UpsertIndexingParams) -> R
             params.file_mtime,
             params.embedding_model,
             params.embedding_dim,
-            params.chunking_version, // Keep this one as the params struct uses chunking_version still
+            params.indexing_version,
             params.updated_at,
         ],
         |row| row.get(0),
@@ -80,7 +112,7 @@ pub fn upsert_indexing(conn: &mut Connection, params: UpsertIndexingParams) -> R
 
 pub fn mark_indexed(conn: &Connection, note_id: i64) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE notes SET status = 'indexed', last_error = NULL, indexed_at = ? WHERE note_id = ?",
+        "UPDATE notes SET indexing_status = 'indexed', indexing_error = NULL, indexed_at = ? WHERE note_id = ?",
         rusqlite::params![now_ms(), note_id],
     )?;
     Ok(())
@@ -88,11 +120,11 @@ pub fn mark_indexed(conn: &Connection, note_id: i64) -> Result<(), AppError> {
 
 pub fn mark_failed(conn: &Connection, path: &str, error: &str) -> Result<(), AppError> {
     conn.execute(
-        "INSERT INTO notes (file_path, file_name, status, last_error, updated_at)
+        "INSERT INTO notes (file_path, file_name, indexing_status, indexing_error, updated_at)
          VALUES (?, ?, 'failed', ?, ?)
          ON CONFLICT(file_path) DO UPDATE SET
-            status     = 'failed',
-            last_error = excluded.last_error,
+            indexing_status     = 'failed',
+            indexing_error = excluded.indexing_error,
             updated_at = excluded.updated_at",
         rusqlite::params![path, path, error, now_ms()],
     )?;
@@ -170,7 +202,7 @@ pub fn hard_delete(conn: &Connection, path: &str) -> Result<(), AppError> {
 
 pub fn get_all(conn: &Connection) -> Result<Vec<FileQueryRecord>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT note_id, file_path, is_deleted, file_mtime, embedding_model, chunking_version FROM notes",
+        "SELECT note_id, file_path, is_deleted, file_mtime, embedding_model, indexing_version FROM notes",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(FileQueryRecord {
@@ -179,7 +211,7 @@ pub fn get_all(conn: &Connection) -> Result<Vec<FileQueryRecord>, AppError> {
             is_deleted: row.get(2)?,
             file_mtime: row.get(3)?,
             embedding_model: row.get(4)?,
-            chunking_version: row.get(5)?,
+            indexing_version: row.get(5)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)

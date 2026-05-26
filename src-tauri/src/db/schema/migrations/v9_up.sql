@@ -81,9 +81,27 @@ SET schedule_id = (
 );
 
 -- 4. New columns to capture pre-review snapshots (used by FSRS re-fitting).
-ALTER TABLE review_logs ADD COLUMN prev_stability REAL;
-ALTER TABLE review_logs ADD COLUMN prev_difficulty REAL;
-ALTER TABLE review_logs ADD COLUMN elapsed_days INTEGER;
+-- Replace card_id-based cascade with schedule_id-based cascade.
+CREATE TABLE review_logs_new (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER NOT NULL REFERENCES schedules(schedule_id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL,
+    reviewed_at INTEGER NOT NULL,
+    prev_stability REAL,
+    prev_difficulty REAL,
+    elapsed_days INTEGER
+);
+
+INSERT INTO review_logs_new (log_id, schedule_id, rating, reviewed_at,
+                              prev_stability, prev_difficulty, elapsed_days)
+SELECT log_id, schedule_id, rating, reviewed_at,
+       NULL, NULL, NULL
+FROM review_logs
+WHERE schedule_id IS NOT NULL;  -- filter out orphans
+
+DROP TABLE review_logs;
+ALTER TABLE review_logs_new RENAME TO review_logs;
+CREATE INDEX IF NOT EXISTS idx_review_logs_schedule ON review_logs(schedule_id);
 
 -- 5. Drop FSRS columns from `cards`. SQLite ≥ 3.35 supports DROP COLUMN
 --    directly. If targeting older SQLite, recreate the table without them.
@@ -116,6 +134,7 @@ WHERE front IS NULL OR back IS NULL;
 
 -- 7. Triggers to keep the polymorphic FK honest. SQLite has no native
 --    polymorphic FK, so we enforce integrity at write time.
+--    v9 triggers will be recreated by v10; if migrations stop at v9, the schema is consistent but uses files naming.
 DROP TRIGGER IF EXISTS schedules_check_target_insert;
 CREATE TRIGGER schedules_check_target_insert
 BEFORE INSERT ON schedules

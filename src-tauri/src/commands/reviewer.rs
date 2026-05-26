@@ -20,3 +20,12 @@ pub async fn reviewer_rate(
     let r = Rating::from_i32(rating).ok_or("Invalid rating")?;
     state.reviewer.rate_review(ScheduleId(schedule_id), r).await
 }
+
+#[tauri::command]
+pub async fn reviewer_schedule_note_in_days(
+    state: State<'_, DbState>,
+    note_id: i64,
+    days: i64,
+) -> Result<Schedule, String> {
+    state.reviewer.schedule_note_in_days(crate::domain::NoteId(note_id), days).await
+}

@@ -4,7 +4,7 @@ use fsrs::{FSRS, MemoryState};
 use serde::{Deserialize, Serialize};
 
 use crate::db::repos::{ReviewLogsRepo, SchedulesRepo};
-use crate::domain::{Rating, ReviewLog, Schedule, ScheduleId, SchedulerState, Timestamp};
+use crate::domain::{NewSchedule, Rating, ReviewLog, Schedule, ScheduleId, SchedulerState, Timestamp};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReviewResult {
@@ -123,5 +123,49 @@ impl ReviewerService {
             scheduled_days,
             next_review,
         })
+    }
+
+    /// Schedules a note for review in `days` days. If no schedule exists for the note,
+    /// a new one is created. Otherwise, the existing schedule's `next_review` is updated.
+    pub async fn schedule_note_in_days(&self, note_id: crate::domain::NoteId, days: i64) -> Result<Schedule, String> {
+        let now = Utc::now().timestamp();
+        let due_time = now + days * 86400;
+
+        let target = crate::domain::ReviewTarget::Note(note_id);
+        let existing = self.schedules_repo
+            .find_by_target(target)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if let Some(mut schedule) = existing {
+            schedule.next_review = Some(due_time);
+            self.schedules_repo
+                .set_next_review(schedule.id, Some(due_time))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(schedule)
+        } else {
+            let new_schedule = NewSchedule {
+                target,
+                initial_due: Some(due_time),
+            };
+            let schedule_id = self.schedules_repo
+                .insert(new_schedule)
+                .await
+                .map_err(|e| e.to_string())?;
+            
+            let schedule = Schedule {
+                id: schedule_id,
+                target,
+                state: SchedulerState::New,
+                stability: 0.0,
+                difficulty: 0.0,
+                reps: 0,
+                lapses: 0,
+                last_reviewed: None,
+                next_review: Some(due_time),
+            };
+            Ok(schedule)
+        }
     }
 }

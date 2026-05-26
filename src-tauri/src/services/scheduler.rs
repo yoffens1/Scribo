@@ -8,13 +8,13 @@ pub enum IndexCommand {
     IndexFile {
         file_path: String,
         content: String,
-        fragmenting_version: String,
+        indexing_version: String,
         // Model used for embeddings
         model: String,
     },
     IndexDirectory {
         dir_path: PathBuf,
-        fragmenting_version: String,
+        indexing_version: String,
         model: String,
     },
     Shutdown,
@@ -36,7 +36,7 @@ impl ReindexScheduler {
         tauri::async_runtime::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    IndexCommand::IndexFile { file_path, content, fragmenting_version, model } => {
+                    IndexCommand::IndexFile { file_path, content, indexing_version, model } => {
                         println!("Processing indexing for: {}", file_path);
                         
                         let pool_guard = pool_clone.read();
@@ -49,7 +49,7 @@ impl ReindexScheduler {
                                     &file_path,
                                     &hash,
                                     &model,
-                                    &fragmenting_version,
+                                    &indexing_version,
                                     None
                                 );
 
@@ -65,10 +65,10 @@ impl ReindexScheduler {
                                             file_path: &file_path,
                                             file_name,
                                             file_hash: &hash,
-                                            mtime: None,
+                                            file_mtime: None,
                                             embedding_model: &model,
                                             embedding_dim: 1536,
-                                            fragmenting_version: &fragmenting_version,
+                                            indexing_version: &indexing_version,
                                             fragments: vec![], // TODO: generate via fragmenter and LLM
                                         };
                                         
@@ -82,7 +82,7 @@ impl ReindexScheduler {
                             }
                         }
                     }
-                    IndexCommand::IndexDirectory { dir_path, fragmenting_version: _, model: _ } => {
+                    IndexCommand::IndexDirectory { dir_path, indexing_version: _, model: _ } => {
                         println!("Scanning directory for indexing: {:?}", dir_path);
                         // TODO: Recursively queue notes
                     }
@@ -94,11 +94,11 @@ impl ReindexScheduler {
         Self { sender: tx_clone }
     }
 
-    pub async fn enqueue_file(&self, file_path: String, content: String, fragmenting_version: String, model: String) {
+    pub async fn enqueue_file(&self, file_path: String, content: String, indexing_version: String, model: String) {
         let _ = self.sender.send(IndexCommand::IndexFile {
             file_path,
             content,
-            fragmenting_version,
+            indexing_version,
             model,
         }).await;
     }

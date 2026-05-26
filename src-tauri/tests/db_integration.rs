@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
     use scribo_lib::db::schema::initialize_schema;
-    use scribo_lib::db::repos::cards::review_fsrs;
-    use scribo_lib::domain::card::CardReviewParams;
     use scribo_lib::db::repos::notes::update_content_with_diff;
     use scribo_lib::retrieval::{retrieve, fetch, RetrievalConfig, RetrieveOptions, FetchQuery};
     use scribo_lib::DbState;
@@ -17,8 +15,13 @@ mod tests {
             let mut conn = pool.get().unwrap();
             initialize_schema(&mut conn).unwrap();
         }
+        let pool_arc = std::sync::Arc::new(RwLock::new(Some(pool)));
+        let schedules_repo = std::sync::Arc::new(scribo_lib::db::repos::schedules::SqliteSchedulesRepo::new(pool_arc.clone()));
+        let logs_repo = std::sync::Arc::new(scribo_lib::db::repos::review_logs::SqliteReviewLogsRepo::new(pool_arc.clone()));
+        let reviewer = std::sync::Arc::new(scribo_lib::services::reviewer::ReviewerService::new(schedules_repo, logs_repo));
         DbState {
-            pool: RwLock::new(Some(pool)),
+            pool: pool_arc,
+            reviewer,
             write_lock: Mutex::new(()),
         }
     }
@@ -43,23 +46,27 @@ mod tests {
             Ok(())
         }).unwrap();
 
-        let params = CardReviewParams {
-            card_id: 1,
-            rating: 3,
-        };
-
-        db_state.with_conn(|conn| {
-            let result = review_fsrs(conn, params).unwrap();
-            assert!(result.scheduled_days > 0);
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let result = db_state.reviewer.rate_review(
+                scribo_lib::domain::ScheduleId(1),
+                scribo_lib::domain::Rating::Good,
+            ).await.unwrap();
+            assert!(result.scheduled_days > 0.0);
             assert!(result.next_review > 0);
-            Ok(())
-        }).unwrap();
+        });
 
         db_state.with_conn(|conn| {
             let state: String = conn.query_row("SELECT state FROM schedules WHERE target_type = 'card' AND target_id = 1", [], |r| r.get(0)).unwrap();
             assert_eq!(state, "learning");
 
-            let log_count: i64 = conn.query_row("SELECT COUNT(*) FROM review_logs WHERE card_id = 1", [], |r| r.get(0)).unwrap();
+            let log_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM review_logs rl
+                 JOIN schedules s ON rl.schedule_id = s.schedule_id
+                 WHERE s.target_type = 'card' AND s.target_id = 1",
+                [],
+                |r| r.get(0)
+            ).unwrap();
             assert_eq!(log_count, 1);
             Ok(())
         }).unwrap();

@@ -37,11 +37,6 @@ pub struct Fragment {
     pub token_count: Option<i64>,
     /// Raw little-endian f32 vector. Decoded by the search service when needed.
     pub embedding: Option<Vec<u8>>,
-    
-    // Legacy fields for compilation:
-    pub fragment_id: i64,
-    pub file_path: String,
-    pub fragment_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,24 +47,7 @@ pub struct FragmentInsertRow {
     pub embedding: Vec<u8>,
 }
 
-// Legacy structures for compilation:
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SearchHit {
-    pub fragment_id: i64,
-    pub file_path: String,
-    pub fragment_index: i64,
-    pub snippet: String,
-    pub score: f64,
-}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VectorSearchHit {
-    pub fragment_id: i64,
-    pub file_path: String,
-    pub fragment_index: i64,
-    pub fragment_text: Option<String>,
-    pub similarity: f32,
-}
 
 #[derive(Debug, Clone)]
 pub struct NewFragment {

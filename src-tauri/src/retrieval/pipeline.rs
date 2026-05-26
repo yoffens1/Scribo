@@ -121,7 +121,7 @@ fn hydrate_texts(state: &DbState, candidates: &mut [SearchResult]) {
     for (file_path, indices) in by_path {
         if let Ok(fragments) = state.with_conn(|conn| fragments::get_by_file_path(conn, &file_path, false)) {
             let by_index: HashMap<usize, String> = fragments.into_iter()
-                .map(|ch| (ch.fragment_index as usize, ch.fragment_text.unwrap_or_default()))
+                .map(|ch| (ch.fragment_index as usize, ch.text))
                 .collect();
             for idx in indices {
                 let fragment_idx = candidates[idx].fragment_ref.fragment_index;
@@ -387,10 +387,10 @@ pub fn fetch(
     };
 
     let results = page.into_iter().map(|ch| FetchResult {
-        fragment_id: Some(ch.fragment_id),
+        fragment_id: Some(ch.id.0),
         file_path: ch.file_path,
         fragment_index: ch.fragment_index as usize,
-        fragment_text: ch.fragment_text,
+        fragment_text: Some(ch.text),
         token_count: ch.token_count,
         embedding: ch.embedding.unwrap_or_default(),
     }).collect();

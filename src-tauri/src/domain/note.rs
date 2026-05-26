@@ -91,7 +91,7 @@ pub struct Note {
     pub indexed_at: Option<Timestamp>,
     pub embedding_model: Option<String>,
     pub embedding_dimension: Option<i64>,
-    pub fragmenting_version: Option<String>,
+    pub indexing_version: Option<String>,
 
     pub is_archived: bool,
     pub is_deleted: bool,
@@ -120,35 +120,3 @@ pub struct NoteRevision {
     pub created_at: Timestamp,
 }
 
-// Legacy definitions for compilation:
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UpsertIndexingParams {
-    pub clean_path: String,
-    pub file_name: String,
-    pub file_hash: String,
-    pub file_mtime: i64,
-    pub embedding_model: String,
-    pub embedding_dim: i64,
-    pub chunking_version: String,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct InsertFailedParams {
-    pub clean_path: String,
-    pub file_name: String,
-    pub file_hash: String,
-    pub file_mtime: i64,
-    pub error: String,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FileQueryRecord {
-    pub file_id: i64,
-    pub file_path: String,
-    pub is_deleted: i32,
-    pub file_mtime: Option<i64>,
-    pub embedding_model: Option<String>,
-    pub chunking_version: Option<String>,
-}

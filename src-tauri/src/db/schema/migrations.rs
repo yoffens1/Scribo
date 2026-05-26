@@ -74,6 +74,11 @@ pub fn apply_migrations(conn: &mut Connection, mut from_version: i32) -> Result<
     if from_version < 10 {
         migrate_v10(&tx)?;
         set_schema_version(&tx, 10)?;
+        from_version = 10;
+    }
+    if from_version < 11 {
+        migrate_v11(&tx)?;
+        set_schema_version(&tx, 11)?;
     }
 
     tx.commit()?;
@@ -206,6 +211,12 @@ fn migrate_v10(conn: &Transaction) -> Result<(), AppError> {
     Ok(())
 }
 
+fn migrate_v11(conn: &Transaction) -> Result<(), AppError> {
+    let sql = include_str!("migrations/v11_up.sql");
+    conn.execute_batch(sql)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,7 +332,7 @@ mod tests {
         for expected in &["cards", "fragments", "fragments_fts", "notes", "meta", "schedules", "note_revisions", "review_logs"] {
             assert!(tables.iter().any(|t| t == expected), "Missing table: {}", expected);
         }
-        for col in &["source_note_id", "embedding_model", "fragmenting_version", "indexing_status", "indexed_at", "title", "content", "tags"] {
+        for col in &["source_note_id", "embedding_model", "indexing_version", "indexing_status", "indexed_at", "title", "content", "tags"] {
             let tx = conn.unchecked_transaction().unwrap();
             assert!(column_exists(&tx, "notes", col).unwrap(), "Missing column notes.{}", col);
             tx.rollback().unwrap();
@@ -331,6 +342,231 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(version, 10, "Schema version must be 10 after full migration");
+        assert_eq!(version, 11, "Schema version must be 11 after full migration");
+    }
+
+    #[test]
+    fn test_backfill_after_migration() {
+        let mut conn = open();
+        // Set up pre-v10 state manually
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '9');
+             CREATE TABLE files (
+                 file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_path TEXT NOT NULL UNIQUE,
+                 file_name TEXT NOT NULL,
+                 status TEXT,
+                 last_error TEXT,
+                 source_file_id INTEGER,
+                 chunking_version TEXT
+             );
+             CREATE TABLE chunks (
+                 chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL,
+                 chunk_index INTEGER NOT NULL,
+                 chunk_text TEXT,
+                 embedding BLOB NOT NULL
+             );
+             CREATE TABLE cards (
+                 card_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL UNIQUE REFERENCES files(file_id) ON DELETE CASCADE,
+                 anki_note_id INTEGER,
+                 front TEXT,
+                 back TEXT,
+                 card_type TEXT,
+                 source_fragment_id INTEGER,
+                 source_offset INTEGER,
+                 source_length INTEGER,
+                 generated_by TEXT,
+                 is_suspended INTEGER
+             );
+             CREATE TABLE schedules (
+                 schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 target_type TEXT NOT NULL,
+                 target_id INTEGER NOT NULL
+             );
+             CREATE TABLE files_history (
+                 history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL,
+                 patch TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             INSERT INTO files (file_path, file_name) VALUES ('/path/to/my_file.md', 'my_file.md');"
+        ).unwrap();
+
+        // Write a temp file matching the path so we can test content reading
+        let temp_dir = std::env::temp_dir();
+        let test_file_path = temp_dir.join("test_scribo_note.md");
+        std::fs::write(&test_file_path, "Hello from filesystem!").unwrap();
+        let path_str = test_file_path.to_string_lossy().to_string();
+
+        conn.execute(
+            "INSERT INTO files (file_path, file_name) VALUES (?, ?);",
+            rusqlite::params![path_str, "test_scribo_note.md"],
+        ).unwrap();
+
+        // Apply migration v10
+        let tx = conn.transaction().unwrap();
+        migrate_v10(&tx).unwrap();
+        tx.commit().unwrap();
+
+        // Perform backfill
+        crate::db::schema::helpers::backfill_notes_after_migration(&conn).unwrap();
+
+        // Check if title is backfilled
+        let title1: String = conn.query_row("SELECT title FROM notes WHERE file_name = 'my_file.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(title1, "my_file");
+
+        let title2: String = conn.query_row("SELECT title FROM notes WHERE file_name = 'test_scribo_note.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(title2, "test_scribo_note");
+
+        // Check if content is backfilled from temp file
+        let content2: String = conn.query_row("SELECT content FROM notes WHERE file_name = 'test_scribo_note.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(content2, "Hello from filesystem!");
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(test_file_path);
+    }
+
+    #[test]
+    fn test_v9_preserves_fsrs_state_in_schedules() {
+        let mut conn = open();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '8');
+             CREATE TABLE files (
+                 file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_path TEXT NOT NULL UNIQUE,
+                 file_name TEXT NOT NULL
+             );
+             CREATE TABLE cards (
+                 card_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL UNIQUE REFERENCES files(file_id) ON DELETE CASCADE,
+                 state TEXT,
+                 stability REAL,
+                 difficulty REAL,
+                 reps INTEGER,
+                 lapses INTEGER,
+                 last_reviewed INTEGER,
+                 next_review INTEGER
+             );
+             CREATE TABLE review_logs (
+                 log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 card_id INTEGER NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+                 rating INTEGER NOT NULL,
+                 reviewed_at INTEGER NOT NULL
+             );
+             INSERT INTO files (file_path, file_name) VALUES ('test.md', 'test.md');
+             INSERT INTO cards (file_id, state, stability, difficulty, reps, lapses, last_reviewed, next_review) 
+               VALUES (1, 'review', 5.5, 4.4, 3, 1, 1000, 2000);"
+        ).unwrap();
+
+        let tx = conn.transaction().unwrap();
+        migrate_v9(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let row = conn.query_row(
+            "SELECT state, stability, difficulty, reps, lapses, last_reviewed, next_review 
+             FROM schedules WHERE target_type = 'card' AND target_id = 1",
+            [],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, f64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, i64>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        ).unwrap();
+
+        assert_eq!(row.0, "review");
+        assert_eq!(row.1, 5.5);
+        assert_eq!(row.2, 4.4);
+        assert_eq!(row.3, 3);
+        assert_eq!(row.4, 1);
+        assert_eq!(row.5, 1000);
+        assert_eq!(row.6, 2000);
+
+        // Verify card FSRS fields are gone
+        let tx = conn.unchecked_transaction().unwrap();
+        assert!(!column_exists(&tx, "cards", "stability").unwrap());
+    }
+
+    #[test]
+    fn test_v10_renames_preserve_data() {
+        let mut conn = open();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '9');
+             CREATE TABLE files (
+                 file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_path TEXT NOT NULL UNIQUE,
+                 file_name TEXT NOT NULL,
+                 status TEXT,
+                 last_error TEXT,
+                 source_file_id INTEGER,
+                 chunking_version TEXT
+             );
+             CREATE TABLE chunks (
+                 chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL,
+                 chunk_index INTEGER NOT NULL,
+                 chunk_text TEXT,
+                 embedding BLOB NOT NULL
+             );
+             CREATE TABLE cards (
+                 card_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL UNIQUE REFERENCES files(file_id) ON DELETE CASCADE,
+                 anki_note_id INTEGER,
+                 front TEXT,
+                 back TEXT,
+                 card_type TEXT NOT NULL DEFAULT 'basic',
+                 source_fragment_id INTEGER,
+                 source_offset INTEGER,
+                 source_length INTEGER,
+                 generated_by TEXT,
+                 is_suspended INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE schedules (
+                 schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 target_type TEXT NOT NULL,
+                 target_id INTEGER NOT NULL
+             );
+             CREATE TABLE files_history (
+                 history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id INTEGER NOT NULL,
+                 patch TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             INSERT INTO files (file_id, file_path, file_name, status, chunking_version) 
+               VALUES (42, 'data.md', 'data.md', 'indexed', 'v1');
+             INSERT INTO chunks (file_id, chunk_index, chunk_text, embedding) 
+               VALUES (42, 0, 'some searchable data', X'00');
+             INSERT INTO cards (file_id, front, back) VALUES (42, 'q', 'a');"
+        ).unwrap();
+
+        let tx = conn.transaction().unwrap();
+        migrate_v10(&tx).unwrap();
+        tx.commit().unwrap();
+
+        // 1. Verify files -> notes renamed correctly
+        let note_id: i64 = conn.query_row("SELECT note_id FROM notes WHERE file_path = 'data.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(note_id, 42);
+        
+        let indexing_status: String = conn.query_row("SELECT indexing_status FROM notes WHERE note_id = 42", [], |r| r.get(0)).unwrap();
+        assert_eq!(indexing_status, "indexed");
+        
+        let fragmenting_ver: String = conn.query_row("SELECT fragmenting_version FROM notes WHERE note_id = 42", [], |r| r.get(0)).unwrap();
+        assert_eq!(fragmenting_ver, "v1");
+
+        // 2. Verify chunks -> fragments
+        let text: String = conn.query_row("SELECT text FROM fragments WHERE note_id = 42", [], |r| r.get(0)).unwrap();
+        assert_eq!(text, "some searchable data");
+
+        // 3. Verify fragments_fts works
+        let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM fragments_fts WHERE text MATCH 'searchable'", [], |r| r.get(0)).unwrap();
+        assert_eq!(fts_count, 1);
     }
 }

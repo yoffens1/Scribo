@@ -4,7 +4,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::sync::Arc;
 
-use crate::domain::{ReviewLog, Rating, ScheduleId, Timestamp};
+use crate::domain::{ReviewLog, Rating, ScheduleId};
 use super::{RepoError, ReviewLogsRepo};
 
 pub struct SqliteReviewLogsRepo {

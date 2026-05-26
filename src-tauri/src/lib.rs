@@ -45,6 +45,7 @@ pub fn run() {
             commands::search::retrieval_fetch,
             commands::reviewer::reviewer_get_due,
             commands::reviewer::reviewer_rate,
+            commands::reviewer::reviewer_schedule_note_in_days,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

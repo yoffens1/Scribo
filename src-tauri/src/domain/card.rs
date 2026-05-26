@@ -95,16 +95,4 @@ pub struct NewCard {
     pub generated_by: Option<String>,
 }
 
-// Legacy structures for compilation:
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CardReviewParams {
-    pub card_id: i64,
-    pub rating: i32,
-}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ReviewResult {
-    pub success: bool,
-    pub scheduled_days: i64,
-    pub next_review: i64,
-}

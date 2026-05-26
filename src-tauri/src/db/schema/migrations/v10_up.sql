@@ -47,6 +47,51 @@ ALTER TABLE notes ADD COLUMN tags TEXT;
 --    Cards already reference notes by id; the column was `file_id`, rename it.
 ALTER TABLE cards RENAME COLUMN file_id TO note_id;
 
+-- Remove UNIQUE constraint from cards.note_id (former file_id) and allow NULL.
+-- Since SQLite does not support ALTER TABLE DROP CONSTRAINT or dropping UNIQUE,
+-- we recreate the cards table.
+CREATE TABLE cards_new (
+    card_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER REFERENCES notes(note_id) ON DELETE CASCADE,  -- WITHOUT UNIQUE AND WITHOUT NOT NULL
+    anki_note_id INTEGER,
+    front TEXT,
+    back TEXT,
+    card_type TEXT NOT NULL DEFAULT 'basic'
+        CHECK (card_type IN ('basic', 'reverse', 'cloze')),
+    source_fragment_id INTEGER REFERENCES fragments(fragment_id) ON DELETE SET NULL,
+    source_offset INTEGER,
+    source_length INTEGER,
+    generated_by TEXT,
+    is_suspended INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+
+INSERT INTO cards_new (card_id, note_id, anki_note_id, front, back, card_type,
+                       source_fragment_id, source_offset, source_length,
+                       generated_by, is_suspended)
+SELECT card_id, note_id, anki_note_id, front, back, card_type,
+       source_fragment_id, source_offset, source_length,
+       generated_by, is_suspended
+FROM cards;
+
+DROP TRIGGER IF EXISTS schedules_check_target_insert;
+DROP TRIGGER IF EXISTS schedules_check_target_update;
+DROP TABLE cards;
+ALTER TABLE cards_new RENAME TO cards;
+
+-- Recreate trigger schedules_cascade_card_delete that was dropped with the cards table.
+DROP TRIGGER IF EXISTS schedules_cascade_card_delete;
+CREATE TRIGGER schedules_cascade_card_delete
+AFTER DELETE ON cards
+FOR EACH ROW
+BEGIN
+    DELETE FROM schedules
+    WHERE target_type = 'card' AND target_id = OLD.card_id;
+END;
+
+CREATE INDEX IF NOT EXISTS idx_cards_note_id ON cards(note_id);
+
 -- 5. Drop and recreate the FTS5 virtual table under the new name.
 DROP TABLE IF EXISTS chunks_fts;
 

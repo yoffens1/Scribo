@@ -5,10 +5,10 @@ pub struct IndexingPayload<'a> {
     pub file_path: &'a str,
     pub file_name: &'a str,
     pub file_hash: &'a str,
-    pub mtime: Option<i64>,
+    pub file_mtime: Option<i64>,
     pub embedding_model: &'a str,
     pub embedding_dim: u32,
-    pub fragmenting_version: &'a str,
+    pub indexing_version: &'a str,
     pub fragments: Vec<FragmentInsertData<'a>>,
 }
 
@@ -31,14 +31,14 @@ pub fn persist_indexed_file(
 
     // 1. Upsert file record
     tx.execute(
-        "INSERT INTO notes (file_path, file_name, file_hash, mtime, embedding_model, fragmenting_version, indexing_status, indexed_at, is_deleted)
+        "INSERT INTO notes (file_path, file_name, file_hash, file_mtime, embedding_model, indexing_version, indexing_status, indexed_at, is_deleted)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'indexed', ?7, 0)
          ON CONFLICT(file_path) DO UPDATE SET
             file_name=excluded.file_name,
             file_hash=excluded.file_hash,
-            mtime=excluded.mtime,
+            file_mtime=excluded.file_mtime,
             embedding_model=excluded.embedding_model,
-            fragmenting_version=excluded.fragmenting_version,
+            indexing_version=excluded.indexing_version,
             indexing_status='indexed',
             indexed_at=excluded.indexed_at,
             is_deleted=0,
@@ -47,9 +47,9 @@ pub fn persist_indexed_file(
             payload.file_path,
             payload.file_name,
             payload.file_hash,
-            payload.mtime,
+            payload.file_mtime,
             payload.embedding_model,
-            payload.fragmenting_version,
+            payload.indexing_version,
             now,
         ),
     ).map_err(|e| AppError::Other(e.to_string()))?;

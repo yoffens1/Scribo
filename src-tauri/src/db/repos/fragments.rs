@@ -1,6 +1,35 @@
 use rusqlite::Connection;
 use crate::error::AppError;
-use crate::domain::fragment::{Fragment, FragmentInsertRow, SearchHit, VectorSearchHit};
+use crate::domain::fragment::FragmentInsertRow;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SearchHit {
+    pub fragment_id: i64,
+    pub file_path: String,
+    pub fragment_index: i64,
+    pub snippet: String,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VectorSearchHit {
+    pub fragment_id: i64,
+    pub file_path: String,
+    pub fragment_index: i64,
+    pub fragment_text: Option<String>,
+    pub similarity: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FragmentRow {
+    pub id: crate::domain::fragment::FragmentId,
+    pub note_id: crate::domain::note::NoteId,
+    pub fragment_index: i64,
+    pub text: String,
+    pub token_count: Option<i64>,
+    pub embedding: Option<Vec<u8>>,
+    pub file_path: String,
+}
 
 
 
@@ -39,8 +68,8 @@ fn fetch_fragments(
     conn: &Connection,
     extra_where: &str,
     params: &[&dyn rusqlite::types::ToSql],
-) -> Result<Vec<Fragment>, AppError> {
-    let base = "SELECT c.fragment_id, f.file_path, c.fragment_index, c.text, c.token_count, c.embedding
+) -> Result<Vec<FragmentRow>, AppError> {
+    let base = "SELECT c.fragment_id, f.file_path, c.fragment_index, c.text, c.token_count, c.embedding, c.note_id
                 FROM fragments c
                 JOIN notes f ON f.note_id = c.note_id";
     let sql = if extra_where.is_empty() {
@@ -51,16 +80,14 @@ fn fetch_fragments(
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params, |row| {
-        Ok(Fragment {
+        Ok(FragmentRow {
             id: crate::domain::fragment::FragmentId(row.get(0)?),
-            note_id: crate::domain::note::NoteId(0), // Dummy value since query doesn't fetch it
-            text: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            fragment_id: row.get(0)?,
             file_path: row.get(1)?,
             fragment_index: row.get(2)?,
-            fragment_text: row.get(3)?,
+            text: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             token_count: row.get(4)?,
             embedding: row.get(5)?,
+            note_id: crate::domain::note::NoteId(row.get(6)?),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -70,7 +97,7 @@ pub fn get_by_file_path(
     conn: &Connection,
     file_path: &str,
     include_deleted: bool,
-) -> Result<Vec<Fragment>, AppError> {
+) -> Result<Vec<FragmentRow>, AppError> {
     let clause = if include_deleted {
         "f.file_path = ?"
     } else {
@@ -82,7 +109,7 @@ pub fn get_by_file_path(
 pub fn get_all(
     conn: &Connection,
     include_deleted: bool,
-) -> Result<Vec<Fragment>, AppError> {
+) -> Result<Vec<FragmentRow>, AppError> {
     let clause = if include_deleted { "" } else { "f.is_deleted = 0" };
     fetch_fragments(conn, clause, &[])
 }
@@ -91,7 +118,7 @@ pub fn get_by_file_name(
     conn: &Connection,
     name: &str,
     include_deleted: bool,
-) -> Result<Vec<Fragment>, AppError> {
+) -> Result<Vec<FragmentRow>, AppError> {
     let clause = if include_deleted {
         "f.file_name = ?"
     } else {

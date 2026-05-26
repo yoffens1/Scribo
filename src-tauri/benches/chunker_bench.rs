@@ -1,38 +1,38 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use scribo_lib::chunker::{chunk_for_embedding, chunk_for_generation, chunk_paired, ChunkOptions};
+use scribo_lib::fragmenter::{fragment_for_embedding, fragment_for_generation, fragment_paired, FragmentOptions};
 use std::env;
 use std::fs;
 
-fn bench_chunker(c: &mut Criterion) {
+fn bench_fragmenter(c: &mut Criterion) {
     let small = include_str!("../test_data/small.md");   // ~5KB
     let medium = include_str!("../test_data/medium.md"); // ~100KB
     let large = include_str!("../test_data/large.md");   // ~1MB
     
-    let default_opts = ChunkOptions::default();
+    let default_opts = FragmentOptions::default();
     
     // 1. Benchmarking Embedding Mode
-    let mut group_emb = c.benchmark_group("chunker/embedding");
+    let mut group_emb = c.benchmark_group("fragmenter/embedding");
     for (name, text) in [("small", small), ("medium", medium), ("large", large)] {
         group_emb.bench_with_input(BenchmarkId::from_parameter(name), text, |b, t| {
-            b.iter(|| chunk_for_embedding(black_box(t), black_box(&default_opts)));
+            b.iter(|| fragment_for_embedding(black_box(t), black_box(&default_opts)));
         });
     }
     group_emb.finish();
 
     // 2. Benchmarking Generation Mode
-    let mut group_gen = c.benchmark_group("chunker/generation");
+    let mut group_gen = c.benchmark_group("fragmenter/generation");
     for (name, text) in [("small", small), ("medium", medium), ("large", large)] {
         group_gen.bench_with_input(BenchmarkId::from_parameter(name), text, |b, t| {
-            b.iter(|| chunk_for_generation(black_box(t), black_box(&default_opts)));
+            b.iter(|| fragment_for_generation(black_box(t), black_box(&default_opts)));
         });
     }
     group_gen.finish();
 
-    // 3. Benchmarking Structural Mode (chunk_paired)
-    let mut group_struct = c.benchmark_group("chunker/paired_parallel");
+    // 3. Benchmarking Structural Mode (fragment_paired)
+    let mut group_struct = c.benchmark_group("fragmenter/paired_parallel");
     for (name, text) in [("small", small), ("medium", medium), ("large", large)] {
         group_struct.bench_with_input(BenchmarkId::from_parameter(name), text, |b, t| {
-            b.iter(|| chunk_paired(black_box(t.to_string()), black_box(&default_opts)));
+            b.iter(|| fragment_paired(black_box(t.to_string()), black_box(&default_opts)));
         });
     }
     group_struct.finish();
@@ -55,11 +55,11 @@ fn bench_chunker(c: &mut Criterion) {
         }
         
         if !inbox_files.is_empty() {
-            let mut group_inbox = c.benchmark_group("chunker/inbox_paired");
+            let mut group_inbox = c.benchmark_group("fragmenter/inbox_paired");
             // Only benchmark the first few files to avoid excessively long benchmark times
             for (name, text) in inbox_files.iter().take(5) {
                 group_inbox.bench_with_input(BenchmarkId::from_parameter(name), text, |b, t| {
-                    b.iter(|| chunk_paired(black_box(t.to_string()), black_box(&default_opts)));
+                    b.iter(|| fragment_paired(black_box(t.to_string()), black_box(&default_opts)));
                 });
             }
             group_inbox.finish();
@@ -67,5 +67,5 @@ fn bench_chunker(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_chunker);
+criterion_group!(benches, bench_fragmenter);
 criterion_main!(benches);
