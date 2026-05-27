@@ -14,22 +14,27 @@ pub async fn analyze_draft_for_distribution(
     })?.ok_or_else(|| AppError::Other(format!("Draft note not found: {}", draft_id)))?;
 
     // 1. Semantic Chunker
+    println!("[Chunker] Starting semantic chunking of note ID {}...", draft_id);
     let chunker = SemanticChunker::new(800, 0.7);
     let chunks = chunker.chunk(&note.content, llm_service).await;
     if chunks.is_empty() {
+        println!("[Chunker] No chunks generated.");
         return Ok(DraftDistributionPlan {
             draft_id,
             chunks: Vec::new(),
         });
     }
+    println!("[Chunker] Successfully split note into {} chunk(s).", chunks.len());
 
     // 2. Parallel Retrieval
+    println!("[Retriever] Querying vector database for similar candidate notes...");
     let retriever = VectorRetriever::new();
     let mut candidate_futures = Vec::new();
     for chunk in &chunks {
         candidate_futures.push(retriever.retrieve_candidates(state, &chunk.text, llm_service));
     }
     let candidates_results = futures::future::join_all(candidate_futures).await;
+    println!("[Retriever] Candidate retrieval complete.");
 
     // 3. Prepare prompt input
     let mut prompt_inputs = Vec::new();
@@ -58,6 +63,7 @@ pub async fn analyze_draft_for_distribution(
         .collect();
 
     // 4. Batch prompt
+    println!("[Classifier] Running LLM batch recommendation analysis...");
     let prompt = crate::ai::prompts::build_batch_distribute_prompt(&prompt_inputs_borrowed);
     
     let response = llm_service.generate_messages(vec![crate::ai::types::Message {
@@ -67,12 +73,15 @@ pub async fn analyze_draft_for_distribution(
 
     let mut recommendations = Vec::new();
     if let Ok(res) = response {
+        println!("[Classifier] Received LLM response. Extracting JSON payload...");
         if let Some(json_str) = extract_json_payload(&res.text) {
             match serde_json::from_str::<Vec<LlmRecommendation>>(&json_str) {
                 Ok(recs) => {
+                    println!("[Classifier] Parsed {} recommendations successfully.", recs.len());
                     recommendations = recs;
                 }
                 Err(e) => {
+                    println!("[Classifier] Failed to parse batch JSON: {}. Raw: {}", e, res.text);
                     for _ in 0..chunks.len() {
                         recommendations.push(LlmRecommendation {
                             action: DistributeAction::Skip,
@@ -83,7 +92,11 @@ pub async fn analyze_draft_for_distribution(
                     }
                 }
             }
+        } else {
+            println!("[Classifier] Failed to extract JSON payload from LLM response.");
         }
+    } else {
+        println!("[Classifier] LLM request failed.");
     }
 
     while recommendations.len() < chunks.len() {
@@ -112,6 +125,7 @@ pub async fn analyze_draft_for_distribution(
     };
 
     // Save distribution run audit log
+    println!("[Analyze] Saving distribution run plan to DB...");
     let plan_json = serde_json::to_string(&plan).unwrap_or_default();
     state.with_conn(|conn| {
         conn.execute(
@@ -122,5 +136,6 @@ pub async fn analyze_draft_for_distribution(
         Ok(())
     }).map_err(|e: AppError| e)?;
 
+    println!("[Analyze] Draft analysis complete.");
     Ok(plan)
 }

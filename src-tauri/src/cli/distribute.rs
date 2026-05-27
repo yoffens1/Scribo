@@ -64,7 +64,7 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
     let state = crate::DbState::new();
     *state.pool.write() = Some(pool);
 
-    let llm_service = std::sync::Arc::new(crate::ai::LlmService::new(llm_config, None));
+    let llm_service = std::sync::Arc::new(crate::ai::LlmService::new(llm_config.clone(), None));
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -72,11 +72,11 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
         .unwrap();
 
     rt.block_on(async {
-        println!("Analyzing note ID {}...", note_id);
+        println!("[Analyze] Starting note analysis...");
         let plan = match crate::services::distribute::analyze_draft_for_distribution(&state, note_id, &llm_service).await {
             Ok(p) => p,
             Err(e) => {
-                println!("Analysis failed: {}", e);
+                println!("[Analyze] Analysis failed: {}", e);
                 return;
             }
         };
@@ -117,10 +117,113 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
         if std::io::stdin().read_line(&mut input).is_ok() {
             let trimmed = input.trim().to_lowercase();
             if trimmed == "y" || trimmed == "yes" {
-                match crate::services::distribute::apply_distribution(conn, plan) {
-                    Ok(_) => println!("Plan successfully applied and original note archived!"),
-                    Err(e) => println!("Failed to apply plan: {}", e),
+                println!("[Apply] Applying distribution plan to database...");
+                let affected_note_ids = match crate::services::distribute::apply_distribution(conn, plan) {
+                    Ok(ids) => {
+                        println!("[Apply] Distribution plan applied successfully! Original note archived. Affected note IDs: {:?}", ids);
+                        ids
+                    }
+                    Err(e) => {
+                        println!("[Apply] Failed to apply plan: {}", e);
+                        return;
+                    }
+                };
+
+                // Indexer stage
+                println!("[Indexer] Updating indexing state and parsing sections...");
+                for &id in &affected_note_ids {
+                    let payload = crate::services::indexer::IndexingPayload {
+                        note_id: id,
+                        embedding_model: &llm_config.model,
+                        embedding_dim: 384,
+                        indexing_version: "1",
+                    };
+                    if let Err(e) = crate::services::indexer::persist_indexed_file(conn, payload) {
+                        println!("[Indexer] Failed to persist index for note {}: {}", id, e);
+                    } else {
+                        println!("[Indexer] Indexed note {}.", id);
+                    }
                 }
+
+                // Embedder stage
+                println!("[Embedder] Computing fragment embeddings...");
+                for &id in &affected_note_ids {
+                    let fragments = match crate::db::repos::fragments::list_by_note(conn, id) {
+                        Ok(frags) => frags,
+                        Err(e) => {
+                            println!("[Embedder] Failed to list fragments for note {}: {}", id, e);
+                            continue;
+                        }
+                    };
+
+                    let model_name = &llm_config.model;
+                    let mut final_embeddings = vec![None; fragments.len()];
+                    let mut cache_miss_indices = Vec::new();
+                    let mut cache_miss_texts = Vec::new();
+
+                    for (idx, frag) in fragments.iter().enumerate() {
+                        let cache_hit: Option<Vec<u8>> = conn.query_row(
+                            "SELECT embedding FROM embedding_cache WHERE clean_text_hash = ? AND embedding_model = ? AND embedding_model_version = '1'",
+                            rusqlite::params![frag.clean_hash, model_name],
+                            |r| r.get(0)
+                        ).ok();
+
+                        if let Some(bytes) = cache_hit {
+                            final_embeddings[idx] = Some(bytes);
+                        } else {
+                            cache_miss_indices.push(idx);
+                            cache_miss_texts.push(frag.text_clean.clone());
+                        }
+                    }
+
+                    if !cache_miss_texts.is_empty() {
+                        println!("[Embedder] Cache miss for {} fragment(s) in note {}. Requesting AI embeddings...", cache_miss_texts.len(), id);
+                        if let Ok(embs) = llm_service.generate_embeddings(cache_miss_texts).await {
+                            for (i, emb) in embs.into_iter().enumerate() {
+                                let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb);
+                                let frag_idx = cache_miss_indices[i];
+                                let clean_hash = &fragments[frag_idx].clean_hash;
+                                
+                                // Insert into cache
+                                let _ = conn.execute(
+                                    "INSERT OR REPLACE INTO embedding_cache (clean_text_hash, embedding_model, embedding_model_version, embedding, created_at)
+                                     VALUES (?, ?, '1', ?, strftime('%s','now'))",
+                                    rusqlite::params![clean_hash, model_name, emb_bytes],
+                                );
+                                
+                                final_embeddings[frag_idx] = Some(emb_bytes.to_vec());
+                            }
+                        } else {
+                            println!("[Embedder] Error: Failed to generate embeddings from AI service.");
+                        }
+                    }
+
+                    // Save fragment embeddings and compute mean-pooled section embeddings
+                    for (idx, frag) in fragments.iter().enumerate() {
+                        if let Some(ref emb_bytes) = final_embeddings[idx] {
+                            let frag_idx = frag.fragment_index;
+                            if let Err(e) = crate::db::repos::fragments::set_embedding(conn, id, frag_idx, emb_bytes) {
+                                println!("[Embedder] Failed to set embedding for note {} fragment {}: {}", id, frag_idx, e);
+                            }
+                        }
+                    }
+
+                    // Compute section embeddings via mean pooling
+                    if let Err(e) = crate::commands::distribute::compute_and_save_section_embeddings(conn, id) {
+                        println!("[Embedder] Failed to compute section embeddings for note {}: {}", id, e);
+                    } else {
+                        println!("[Embedder] Section embeddings pooled and updated for note {}.", id);
+                    }
+                }
+
+                // Refresh stale cards
+                println!("[RefreshCards] Checking and regenerating flashcards for affected notes...");
+                match crate::services::distribute::refresh_stale_cards_for_notes(&state, &affected_note_ids, &llm_service).await {
+                    Ok(_) => println!("[RefreshCards] Card refresh completed successfully."),
+                    Err(e) => println!("[RefreshCards] Error during card refresh: {}", e),
+                }
+
+                println!("[Pipeline] Distribution pipeline finished successfully!");
             } else {
                 println!("Distribution cancelled.");
             }
