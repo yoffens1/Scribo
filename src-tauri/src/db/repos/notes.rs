@@ -12,38 +12,37 @@ pub struct NoteListItem {
 }
 
 fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
-    let parent_note_id: Option<i64> = row.get(5)?;
-    let status_str: String = row.get(9)?;
+    let parent_note_id: Option<i64> = row.get(4)?;
+    let status_str: String = row.get(8)?;
     Ok(Note {
         id: NoteId(row.get(0)?),
         title: row.get(1)?,
         content: row.get(2)?,
         content_hash: row.get(3)?,
-        tags: row.get(4)?,
         parent_note_id: parent_note_id.map(NoteId),
-        path_cached: row.get(6)?,
-        sort_order: row.get(7)?,
-        icon: row.get(8)?,
+        path_cached: row.get(5)?,
+        sort_order: row.get(6)?,
+        icon: row.get(7)?,
         indexing_status: IndexingStatus::parse(&status_str).unwrap_or(IndexingStatus::Pending),
-        indexing_error: row.get(10)?,
-        indexed_at: row.get(11)?,
-        embedding_model: row.get(12)?,
-        embedding_dimension: row.get(13)?,
-        indexing_version: row.get(14)?,
-        is_draft: row.get::<_, i64>(15).unwrap_or(0) != 0,
-        is_archived: row.get::<_, i64>(16).unwrap_or(0) != 0,
-        is_deleted: row.get::<_, i64>(17).unwrap_or(0) != 0,
-        is_pinned: row.get::<_, i64>(18).unwrap_or(0) != 0,
-        is_favorite: row.get::<_, i64>(19).unwrap_or(0) != 0,
-        mastery: row.get(20)?,
-        last_studied: row.get(21)?,
-        created_at: row.get(22)?,
-        updated_at: row.get(23)?,
+        indexing_error: row.get(9)?,
+        indexed_at: row.get(10)?,
+        embedding_model: row.get(11)?,
+        embedding_dimension: row.get(12)?,
+        indexing_version: row.get(13)?,
+        is_draft: row.get::<_, i64>(14).unwrap_or(0) != 0,
+        is_archived: row.get::<_, i64>(15).unwrap_or(0) != 0,
+        is_deleted: row.get::<_, i64>(16).unwrap_or(0) != 0,
+        is_pinned: row.get::<_, i64>(17).unwrap_or(0) != 0,
+        is_favorite: row.get::<_, i64>(18).unwrap_or(0) != 0,
+        mastery: row.get(19)?,
+        last_studied: row.get(20)?,
+        created_at: row.get(21)?,
+        updated_at: row.get(22)?,
     })
 }
 
 const SELECT_NOTE_COLUMNS: &str = 
-    "SELECT note_id, title, content, content_hash, tags, 
+    "SELECT note_id, title, content, content_hash, 
             parent_note_id, path_cached, sort_order, icon,
             indexing_status, indexing_error, indexed_at, embedding_model, embedding_dimension, 
             indexing_version, is_draft, is_archived, is_deleted, is_pinned, is_favorite,
@@ -108,15 +107,14 @@ pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<
 
     let note_id: i64 = conn.query_row(
         "INSERT INTO notes (
-            title, content, content_hash, tags, parent_note_id, path_cached, sort_order, icon,
+            title, content, content_hash, parent_note_id, path_cached, sort_order, icon,
             indexing_status, is_draft, is_archived, is_deleted, is_pinned, is_favorite, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, ?, ?, ?, ?)
          RETURNING note_id",
         rusqlite::params![
             note.title,
             note.content,
             content_hash,
-            note.tags,
             parent_id,
             path_cached,
             sort_order,
@@ -182,7 +180,38 @@ pub fn rename(conn: &Connection, note_id: i64, new_title: &str, updated_at: i64)
     Ok(())
 }
 
+fn is_descendant(conn: &Connection, ancestor_id: i64, descendant_id: i64) -> Result<bool, AppError> {
+    let mut current_id = descendant_id;
+    loop {
+        let parent_id_opt: Option<i64> = conn.query_row(
+            "SELECT parent_note_id FROM notes WHERE note_id = ?",
+            [current_id],
+            |r| r.get(0)
+        ).optional()?;
+        
+        match parent_id_opt {
+            Some(pid) => {
+                if pid == ancestor_id {
+                    return Ok(true);
+                }
+                current_id = pid;
+            }
+            None => break,
+        }
+    }
+    Ok(false)
+}
+
 pub fn move_note(conn: &Connection, note_id: i64, new_parent_id: Option<NoteId>, updated_at: i64) -> Result<(), AppError> {
+    if let Some(pid) = new_parent_id {
+        if pid.0 == note_id {
+            return Err(AppError::Other("A note cannot be its own parent".to_string()));
+        }
+        if is_descendant(conn, note_id, pid.0)? {
+            return Err(AppError::Other("Circular parent-child relationship detected".to_string()));
+        }
+    }
+
     let title: String = conn.query_row(
         "SELECT title FROM notes WHERE note_id = ?",
         [note_id],
@@ -295,3 +324,13 @@ pub fn set_content(conn: &Connection, note_id: i64, content: &str) -> Result<(),
     )?;
     Ok(())
 }
+
+pub fn archive_note(conn: &Connection, note_id: i64) -> Result<(), AppError> {
+    let now = crate::db::time::now_seconds();
+    conn.execute(
+        "UPDATE notes SET is_draft = 0, is_archived = 1, updated_at = ? WHERE note_id = ?",
+        rusqlite::params![now, note_id],
+    )?;
+    Ok(())
+}
+

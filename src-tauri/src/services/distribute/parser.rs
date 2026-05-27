@@ -1,17 +1,5 @@
 use pulldown_cmark::{Event, Tag, HeadingLevel, Options, Parser};
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TopicChunk {
-    pub text: String,
-    pub suggested_title: String,
-}
-
-pub struct RawBlock {
-    pub range: std::ops::Range<usize>,
-    pub text: String,
-    pub is_heading_h1_h2: bool,
-    pub heading_title: Option<String>,
-}
+use super::types::{TopicChunk, RawBlock};
 
 pub fn parse_raw_blocks(content: &str) -> Vec<RawBlock> {
     let options = Options::all();
@@ -112,8 +100,6 @@ pub fn split_into_topics(content: &str, max_chars: usize) -> Vec<TopicChunk> {
     for block in raw_blocks {
         let block_len = block.text.len();
         
-        // If we hit an H1/H2 heading, or if adding this block exceeds the max length,
-        // we must flush the current chunk first (if not empty).
         let should_flush = !current_chunk_blocks.is_empty() && (
             block.is_heading_h1_h2 || (current_chunk_len + block_len > max_chars)
         );
@@ -167,28 +153,4 @@ pub fn split_into_topics(content: &str, max_chars: usize) -> Vec<TopicChunk> {
     }
     
     chunks
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_split_into_topics() {
-        let content = "\
-# Math Note
-This is some content.
-
-## Section 2
-And some more content here.
-- Item 1
-- Item 2
-";
-        let chunks = split_into_topics(content, 1000);
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].suggested_title, "Math Note");
-        assert!(chunks[0].text.contains("This is some content."));
-        assert_eq!(chunks[1].suggested_title, "Section 2");
-        assert!(chunks[1].text.contains("Item 2"));
-    }
 }

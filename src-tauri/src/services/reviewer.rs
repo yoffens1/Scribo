@@ -142,4 +142,16 @@ impl ReviewerService {
             Ok(schedule)
         }
     }
+
+    pub fn get_hierarchical_due_counts(&self, conn: &Connection) -> Result<Vec<crate::domain::NoteDueCount>, AppError> {
+        let now = Utc::now().timestamp();
+        crate::db::repos::schedules::get_hierarchical_due_counts(conn, now)
+    }
+
+    pub fn get_repeat_mode_tree(&self, conn: &Connection) -> Result<Vec<crate::domain::RepeatModeNode>, AppError> {
+        let now = Utc::now().timestamp();
+        crate::db::repos::schedules::get_repeat_mode_tree(conn, now)
+    }
 }
+
+

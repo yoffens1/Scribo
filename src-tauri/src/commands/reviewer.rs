@@ -50,7 +50,11 @@ pub async fn reviewer_get_card(
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Section not found".to_string())?;
 
-        let rendered = card.render(&section);
+        let note = crate::db::repos::notes::get_by_id(conn, section.note_id.0)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Note not found".to_string())?;
+
+        let rendered = card.render(&section, note.id, note.title, note.path_cached);
         Ok(rendered)
     }).map_err(|e: crate::AppError| e.to_string())
 }
@@ -112,3 +116,23 @@ pub async fn reviewer_upgrade_card_front_with_ai(
 
     Ok(generated_question)
 }
+
+#[tauri::command]
+pub async fn reviewer_get_hierarchical_due_counts(
+    state: State<'_, DbState>,
+) -> Result<Vec<crate::domain::NoteDueCount>, String> {
+    state.with_conn(|conn| {
+        state.reviewer.get_hierarchical_due_counts(conn)
+    }).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reviewer_get_repeat_mode_tree(
+    state: State<'_, DbState>,
+) -> Result<Vec<crate::domain::RepeatModeNode>, String> {
+    state.with_conn(|conn| {
+        state.reviewer.get_repeat_mode_tree(conn)
+    }).map_err(|e| e.to_string())
+}
+
+

@@ -133,3 +133,133 @@ pub fn delete_by_target(conn: &Connection, target: ReviewTarget) -> Result<(), A
     )?;
     Ok(())
 }
+
+pub fn get_hierarchical_due_counts(
+    conn: &Connection,
+    now: Timestamp,
+) -> Result<Vec<crate::domain::NoteDueCount>, AppError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE note_tree(parent, descendant) AS (
+            SELECT note_id, note_id
+            FROM notes
+            WHERE is_deleted = 0
+            
+            UNION ALL
+            
+            SELECT t.parent, n.note_id
+            FROM note_tree t
+            JOIN notes n ON n.parent_note_id = t.descendant
+            WHERE n.is_deleted = 0
+        ),
+        direct_due AS (
+            SELECT target_id AS note_id, COUNT(*) AS cnt
+            FROM schedules
+            WHERE target_type = 'note' AND next_review <= ?
+            GROUP BY target_id
+            UNION ALL
+            SELECT sec.note_id, COUNT(*) AS cnt
+            FROM schedules s
+            JOIN cards c ON s.target_id = c.card_id
+            JOIN sections sec ON c.section_id = sec.section_id
+            WHERE s.target_type = 'card' AND s.next_review <= ? AND c.is_suspended = 0
+            GROUP BY sec.note_id
+        ),
+        note_direct_due AS (
+            SELECT note_id, SUM(cnt) AS direct_due_cnt
+            FROM direct_due
+            GROUP BY note_id
+        )
+        SELECT t.parent AS note_id, COALESCE(SUM(d.direct_due_cnt), 0) AS total_due_count
+        FROM note_tree t
+        LEFT JOIN note_direct_due d ON t.descendant = d.note_id
+        GROUP BY t.parent"
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![now, now], |row| {
+        Ok(crate::domain::NoteDueCount {
+            note_id: row.get(0)?,
+            due_count: row.get(1)?,
+        })
+    })?;
+
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r?);
+    }
+    Ok(res)
+}
+
+pub fn get_repeat_mode_tree(
+    conn: &Connection,
+    now: Timestamp,
+) -> Result<Vec<crate::domain::RepeatModeNode>, AppError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE note_tree AS (
+            SELECT n.note_id, n.title, n.parent_note_id, n.path_cached, 0 as depth
+            FROM notes n
+            WHERE n.parent_note_id IS NULL AND n.is_deleted = 0 AND n.is_draft = 0
+            
+            UNION ALL
+            
+            SELECT n.note_id, n.title, n.parent_note_id, n.path_cached, nt.depth + 1
+            FROM notes n
+            JOIN note_tree nt ON n.parent_note_id = nt.note_id
+            WHERE n.is_deleted = 0 AND n.is_draft = 0
+        ),
+        card_counts AS (
+            SELECT 
+                s.note_id,
+                COUNT(*) FILTER (WHERE sch.next_review <= ?) as due_count,
+                COUNT(*) FILTER (WHERE sch.state = 'new') as new_count,
+                COUNT(*) as total_count
+            FROM cards c
+            JOIN sections s USING (section_id)
+            LEFT JOIN schedules sch ON sch.target_type = 'card' AND sch.target_id = c.card_id
+            WHERE c.is_suspended = 0
+            GROUP BY s.note_id
+        )
+        SELECT 
+            nt.note_id,
+            nt.title,
+            nt.parent_note_id,
+            nt.path_cached,
+            nt.depth,
+            COALESCE(cc.due_count, 0) as own_due,
+            COALESCE(cc.total_count, 0) as own_total,
+            (SELECT COALESCE(SUM(due_count), 0) 
+             FROM card_counts cc2 
+             JOIN notes n2 USING (note_id)
+             WHERE n2.path_cached = nt.path_cached 
+                OR n2.path_cached LIKE nt.path_cached || '/%') as subtree_due,
+            (SELECT COALESCE(SUM(total_count), 0) 
+             FROM card_counts cc2 
+             JOIN notes n2 USING (note_id)
+             WHERE n2.path_cached = nt.path_cached 
+                OR n2.path_cached LIKE nt.path_cached || '/%') as subtree_total
+        FROM note_tree nt
+        LEFT JOIN card_counts cc USING (note_id)
+        ORDER BY nt.path_cached"
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![now], |row| {
+        Ok(crate::domain::RepeatModeNode {
+            note_id: row.get(0)?,
+            title: row.get(1)?,
+            parent_note_id: row.get(2)?,
+            path_cached: row.get(3)?,
+            depth: row.get(4)?,
+            own_due: row.get(5)?,
+            own_total: row.get(6)?,
+            subtree_due: row.get(7)?,
+            subtree_total: row.get(8)?,
+        })
+    })?;
+
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r?);
+    }
+    Ok(res)
+}
+
+

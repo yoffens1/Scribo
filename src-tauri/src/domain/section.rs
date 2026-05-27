@@ -26,6 +26,8 @@ pub struct Section {
     pub heading: Option<String>,
     pub heading_level: Option<i64>,
     pub source_hash: String,
+    pub content_offset_start: i64,
+    pub content_offset_end: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -36,4 +38,6 @@ pub struct NewSection {
     pub heading: Option<String>,
     pub heading_level: Option<i64>,
     pub source_hash: String,
+    pub content_offset_start: i64,
+    pub content_offset_end: i64,
 }

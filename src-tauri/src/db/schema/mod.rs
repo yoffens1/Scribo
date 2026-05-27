@@ -19,10 +19,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v11");
+        println!("Init: fresh database, creating all tables directly at v12");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '11')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '12')",
             [],
         )?;
         conn.execute(
@@ -63,10 +63,32 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             )?;
             version = "11".to_string();
         }
+
+        if version == "11" {
+            println!("Init: upgrading database from v11 to v12");
+            conn.execute_batch(
+                "ALTER TABLE sections ADD COLUMN content_offset_start INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sections ADD COLUMN content_offset_end INTEGER NOT NULL DEFAULT 0;
+
+                 CREATE TABLE IF NOT EXISTS distribution_runs (
+                    run_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    draft_id            INTEGER NOT NULL,
+                    plan_json           TEXT NOT NULL,
+                    result_json         TEXT,
+                    generator_version   TEXT NOT NULL,
+                    status              TEXT NOT NULL CHECK (status IN ('analyzed', 'applied', 'cancelled')),
+                    created_at          INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    applied_at          INTEGER
+                 );
+
+                 UPDATE meta SET value = '12' WHERE key = 'schema_version';"
+            )?;
+            version = "12".to_string();
+        }
         
-        if version != "11" {
+        if version != "12" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 11", version
+                "Unsupported database version: got {}, expected 12", version
             )));
         }
     }

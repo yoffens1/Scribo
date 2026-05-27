@@ -185,3 +185,25 @@ pub struct ReviewLog {
     /// Days since the previous review at the moment of this one.
     pub elapsed_days: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteDueCount {
+    pub note_id: i64,
+    pub due_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepeatModeNode {
+    pub note_id: i64,
+    pub title: String,
+    pub parent_note_id: Option<i64>,
+    pub path_cached: String,
+    pub depth: i64,
+    pub own_due: i64,
+    pub own_total: i64,
+    pub subtree_due: i64,
+    pub subtree_total: i64,
+}
+
+
+

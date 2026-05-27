@@ -13,7 +13,7 @@ pub struct SearchHit {
     pub text: String,
     /// Title of the parent note, denormalized for convenient UI rendering.
     pub note_title: Option<String>,
-    pub note_file_path: Option<String>,
+    pub note_path: Option<String>,
     pub snippet: Option<String>,
 }
 

@@ -84,10 +84,20 @@ pub struct RenderedCard {
     pub front: String,
     pub back: String,
     pub card_type: CardType,
+    // Context for UI
+    pub note_id: crate::domain::NoteId,
+    pub note_title: String,
+    pub note_path: String,
 }
 
 impl Card {
-    pub fn render(&self, section: &crate::domain::section::Section) -> RenderedCard {
+    pub fn render(
+        &self,
+        section: &crate::domain::section::Section,
+        note_id: crate::domain::NoteId,
+        note_title: String,
+        note_path: String,
+    ) -> RenderedCard {
         match self.card_type {
             CardType::Heading => {
                 let default_front = section.heading.as_deref().unwrap_or("Untitled Section").to_string();
@@ -97,6 +107,9 @@ impl Card {
                     front: self.custom_front.clone().unwrap_or(default_front),
                     back: self.custom_back.clone().unwrap_or(default_back),
                     card_type: self.card_type,
+                    note_id,
+                    note_title,
+                    note_path,
                 }
             }
             CardType::Qa | CardType::Manual => RenderedCard {
@@ -104,6 +117,9 @@ impl Card {
                 front: self.custom_front.clone().unwrap_or_default(),
                 back: self.custom_back.clone().unwrap_or_default(),
                 card_type: self.card_type,
+                note_id,
+                note_title,
+                note_path,
             },
             CardType::Cloze => {
                 let masked = apply_cloze_mask(&section.text_raw, self.cloze_mask.as_deref());
@@ -112,6 +128,9 @@ impl Card {
                     front: masked,
                     back: section.text_raw.to_string(),
                     card_type: self.card_type,
+                    note_id,
+                    note_title,
+                    note_path,
                 }
             }
         }

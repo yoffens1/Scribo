@@ -392,8 +392,9 @@ mod tests {
 
                 let card = scribo_lib::db::repos::cards::find_by_id(conn, scribo_lib::domain::CardId(card_id)).unwrap().unwrap();
                 let section = scribo_lib::db::repos::sections::find_by_id(conn, scribo_lib::domain::SectionId(section_id)).unwrap().unwrap();
+                let note = scribo_lib::db::repos::notes::get_by_id(conn, section.note_id.0).unwrap().unwrap();
 
-                let rendered = card.render(&section);
+                let rendered = card.render(&section, note.id, note.title, note.path_cached);
                 // Back should be exactly section.text_raw, which preserves raw markdown
                 assert_eq!(rendered.back, section.text_raw, "Card back must preserve raw markdown from section");
             }
@@ -404,4 +405,266 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[test]
+    fn test_hierarchical_due_counts() {
+        let db_state = setup_test_db();
+        db_state.with_write(|conn| {
+            // Create hierarchical notes structure:
+            // Math
+            //   Linear Algebra
+            //   Calculus
+            //     Integration
+            let math_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Math".to_string(),
+                content: "Math root".to_string(),
+                ..Default::default()
+            }).unwrap();
+
+            let la_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Linear Algebra".to_string(),
+                content: "LA content".to_string(),
+                parent_note_id: Some(math_id),
+                ..Default::default()
+            }).unwrap();
+
+            let calc_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Calculus".to_string(),
+                content: "Calc content".to_string(),
+                parent_note_id: Some(math_id),
+                ..Default::default()
+            }).unwrap();
+
+            let integration_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Integration".to_string(),
+                content: "Integration content".to_string(),
+                parent_note_id: Some(calc_id),
+                ..Default::default()
+            }).unwrap();
+
+            // Setup sections and cards for the notes
+            // Section for Math
+            let math_sec = conn.query_row(
+                "INSERT INTO sections (note_id, section_index, text_raw, source_hash) VALUES (?, 0, 'Math root', 'hash1') RETURNING section_id",
+                [math_id.0],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card1 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [math_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+
+            // Section for Linear Algebra
+            let la_sec = conn.query_row(
+                "INSERT INTO sections (note_id, section_index, text_raw, source_hash) VALUES (?, 0, 'LA content', 'hash2') RETURNING section_id",
+                [la_id.0],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card2 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [la_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+
+            // Section for Integration
+            let integration_sec = conn.query_row(
+                "INSERT INTO sections (note_id, section_index, text_raw, source_hash) VALUES (?, 0, 'Integration content', 'hash3') RETURNING section_id",
+                [integration_id.0],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card3 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [integration_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+
+            // Create schedules for reviews
+            let now = chrono::Utc::now().timestamp();
+            // Note review for Calculus (due)
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review) VALUES ('note', ?, ?)",
+                rusqlite::params![calc_id.0, now - 100]
+            ).unwrap();
+
+            // Card review for Math card1 (due)
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review) VALUES ('card', ?, ?)",
+                rusqlite::params![card1, now - 50]
+            ).unwrap();
+
+            // Card review for Linear Algebra card2 (due)
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review) VALUES ('card', ?, ?)",
+                rusqlite::params![card2, now - 10]
+            ).unwrap();
+
+            // Card review for Integration card3 (not due yet - in future)
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review) VALUES ('card', ?, ?)",
+                rusqlite::params![card3, now + 1000]
+            ).unwrap();
+
+            // Query due counts
+            let counts = scribo_lib::db::repos::schedules::get_hierarchical_due_counts(conn, now).unwrap();
+            
+            // Expected counts:
+            // Math: card1 (1) + card2 (1) + calc_id note review (1) = 3
+            // Linear Algebra: card2 (1) = 1
+            // Calculus: calc_id note review (1) = 1 (Integration card3 is in future)
+            // Integration: 0
+            
+            let math_count = counts.iter().find(|c| c.note_id == math_id.0).map(|c| c.due_count).unwrap_or(0);
+            let la_count = counts.iter().find(|c| c.note_id == la_id.0).map(|c| c.due_count).unwrap_or(0);
+            let calc_count = counts.iter().find(|c| c.note_id == calc_id.0).map(|c| c.due_count).unwrap_or(0);
+            let integration_count = counts.iter().find(|c| c.note_id == integration_id.0).map(|c| c.due_count).unwrap_or(0);
+
+            assert_eq!(math_count, 3);
+            assert_eq!(la_count, 1);
+            assert_eq!(calc_count, 1);
+            assert_eq!(integration_count, 0);
+
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_get_repeat_mode_tree() {
+        let db_state = setup_test_db();
+        db_state.with_write(|conn| {
+            // Create hierarchical notes structure:
+            // Math (path_cached = "Math")
+            //   Linear Algebra (path_cached = "Math/Linear Algebra")
+            //   Calculus (path_cached = "Math/Calculus")
+            // Economics (path_cached = "Economics")
+            let math_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Math".to_string(),
+                content: "Math root".to_string(),
+                parent_note_id: None,
+                path_cached: Some("Math".to_string()),
+                ..Default::default()
+            }).unwrap();
+
+            let la_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Linear Algebra".to_string(),
+                content: "LA content".to_string(),
+                parent_note_id: Some(math_id),
+                path_cached: Some("Math/Linear Algebra".to_string()),
+                ..Default::default()
+            }).unwrap();
+
+            let calc_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Calculus".to_string(),
+                content: "Calc content".to_string(),
+                parent_note_id: Some(math_id),
+                path_cached: Some("Math/Calculus".to_string()),
+                ..Default::default()
+            }).unwrap();
+
+            let economics_id = scribo_lib::db::repos::notes::insert(conn, &scribo_lib::domain::NewNote {
+                title: "Economics".to_string(),
+                content: "Economics root".to_string(),
+                parent_note_id: None,
+                path_cached: Some("Economics".to_string()),
+                ..Default::default()
+            }).unwrap();
+
+            // Setup section and card for Linear Algebra
+            let la_sec = conn.query_row(
+                "INSERT INTO sections (note_id, section_index, text_raw, source_hash) VALUES (?, 0, 'LA content', 'hash1') RETURNING section_id",
+                [la_id.0],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card_la = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [la_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+
+            // Setup section and cards for Calculus
+            let calc_sec = conn.query_row(
+                "INSERT INTO sections (note_id, section_index, text_raw, source_hash) VALUES (?, 0, 'Calc content', 'hash2') RETURNING section_id",
+                [calc_id.0],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card_calc1 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [calc_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card_calc2 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [calc_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+            let card_calc3 = conn.query_row(
+                "INSERT INTO cards (section_id) VALUES (?) RETURNING card_id",
+                [calc_sec],
+                |r| r.get::<_, i64>(0)
+            ).unwrap();
+
+            // Create schedules for reviews
+            let now = chrono::Utc::now().timestamp();
+            
+            // card_la: due
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review, state) VALUES ('card', ?, ?, 'review')",
+                rusqlite::params![card_la, now - 100]
+            ).unwrap();
+
+            // card_calc1: due
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review, state) VALUES ('card', ?, ?, 'review')",
+                rusqlite::params![card_calc1, now - 50]
+            ).unwrap();
+
+            // card_calc2: new (no schedule or state = new)
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review, state) VALUES ('card', ?, NULL, 'new')",
+                rusqlite::params![card_calc2]
+            ).unwrap();
+
+            // card_calc3: review in future
+            conn.execute(
+                "INSERT INTO schedules (target_type, target_id, next_review, state) VALUES ('card', ?, ?, 'review')",
+                rusqlite::params![card_calc3, now + 1000]
+            ).unwrap();
+
+            // Query repeat mode tree
+            let nodes = scribo_lib::db::repos::schedules::get_repeat_mode_tree(conn, now).unwrap();
+            
+            // Expected counts:
+            // Math: own_due=0, own_total=0, subtree_due=2 (la due + calc1 due), subtree_total=4 (la + calc1 + calc2 + calc3)
+            // Linear Algebra: own_due=1, own_total=1, subtree_due=1, subtree_total=1
+            // Calculus: own_due=1, own_total=3, subtree_due=1, subtree_total=3
+            // Economics: own_due=0, own_total=0, subtree_due=0, subtree_total=0
+            
+            let math = nodes.iter().find(|n| n.note_id == math_id.0).unwrap();
+            assert_eq!(math.own_due, 0);
+            assert_eq!(math.own_total, 0);
+            assert_eq!(math.subtree_due, 2);
+            assert_eq!(math.subtree_total, 4);
+
+            let la = nodes.iter().find(|n| n.note_id == la_id.0).unwrap();
+            assert_eq!(la.own_due, 1);
+            assert_eq!(la.own_total, 1);
+            assert_eq!(la.subtree_due, 1);
+            assert_eq!(la.subtree_total, 1);
+
+            let calc = nodes.iter().find(|n| n.note_id == calc_id.0).unwrap();
+            assert_eq!(calc.own_due, 1);
+            assert_eq!(calc.own_total, 3);
+            assert_eq!(calc.subtree_due, 1);
+            assert_eq!(calc.subtree_total, 3);
+
+            let eco = nodes.iter().find(|n| n.note_id == economics_id.0).unwrap();
+            assert_eq!(eco.own_due, 0);
+            assert_eq!(eco.own_total, 0);
+            assert_eq!(eco.subtree_due, 0);
+            assert_eq!(eco.subtree_total, 0);
+
+            Ok(())
+        }).unwrap();
+    }
 }
+

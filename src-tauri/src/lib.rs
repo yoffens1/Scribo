@@ -48,6 +48,10 @@ pub fn run() {
             commands::reviewer::reviewer_schedule_note_in_days,
             commands::reviewer::reviewer_upgrade_card_front_with_ai,
             commands::reviewer::reviewer_get_card,
+            commands::reviewer::reviewer_get_hierarchical_due_counts,
+            commands::reviewer::reviewer_get_repeat_mode_tree,
+            commands::distribute::distribute_analyze_draft,
+            commands::distribute::distribute_apply_plan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

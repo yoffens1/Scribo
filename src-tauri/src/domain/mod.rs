@@ -18,7 +18,7 @@ pub use fragment::{Fragment, FragmentId, NewFragment};
 pub use note::{IndexingStatus, NewNote, Note, NoteId, NoteRevision};
 pub use schedule::{
     NewSchedule, Rating, ReviewLog, ReviewTarget, ReviewTargetType, Schedule, ScheduleId,
-    SchedulerState,
+    SchedulerState, NoteDueCount, RepeatModeNode,
 };
 pub use search::{ScoredHit, SearchHit};
 pub use section::{Section, SectionId, NewSection};

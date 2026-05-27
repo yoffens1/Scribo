@@ -3,6 +3,54 @@ use crate::AppError;
 use crate::fragmenter::{fragment_paired, FragmentOptions};
 use crate::db::hash::content_hash;
 
+fn align_to_char_boundary_floor(s: &str, mut idx: usize) -> usize {
+    if idx > s.len() {
+        idx = s.len();
+    }
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn align_to_char_boundary_ceil(s: &str, mut idx: usize) -> usize {
+    if idx > s.len() {
+        return s.len();
+    }
+    while idx < s.len() && !s.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
+}
+
+fn find_safe_offsets(content: &str, text_raw: &str, last_index: usize) -> (usize, usize) {
+    if let Some(idx) = content[last_index..].find(text_raw) {
+        return (last_index + idx, last_index + idx + text_raw.len());
+    }
+    
+    let prefix = text_raw.lines().next().unwrap_or("").trim();
+    if !prefix.is_empty() {
+        if let Some(idx) = content[last_index..].find(prefix) {
+            let start = last_index + idx;
+            let mut end = start + text_raw.len();
+            if end > content.len() {
+                end = content.len();
+            }
+            let start_aligned = align_to_char_boundary_floor(content, start);
+            let end_aligned = align_to_char_boundary_ceil(content, end);
+            return (start_aligned, end_aligned);
+        }
+    }
+    
+    let start = align_to_char_boundary_floor(content, last_index);
+    let mut end = start + text_raw.len();
+    if end > content.len() {
+        end = content.len();
+    }
+    let end_aligned = align_to_char_boundary_ceil(content, end);
+    (start, end_aligned)
+}
+
 pub struct IndexingPayload<'a> {
     pub note_id: i64,
     pub embedding_model: &'a str,
@@ -42,7 +90,7 @@ pub fn persist_indexed_file(
 
     // 3. Chunk the document content
     let options = FragmentOptions::default();
-    let chunk_result = fragment_paired(note.content, &options);
+    let chunk_result = fragment_paired(note.content.clone(), &options);
 
     // 4. Update fragments with diffing logic
     let max_frag_len = std::cmp::max(old_fragments.len(), chunk_result.pairs.len());
@@ -84,6 +132,15 @@ pub fn persist_indexed_file(
     }
 
     // 5. Update sections with diffing logic
+    let mut last_index = 0;
+    let mut section_offsets = Vec::new();
+    for pair in &chunk_result.pairs {
+        let text_raw = &pair.generation;
+        let (start, end) = find_safe_offsets(&note.content, text_raw, last_index);
+        section_offsets.push((start as i64, end as i64));
+        last_index = end;
+    }
+
     let max_sec_len = std::cmp::max(old_sections.len(), chunk_result.pairs.len());
     let tx = conn.transaction().map_err(|e| AppError::Other(e.to_string()))?;
     
@@ -91,7 +148,11 @@ pub fn persist_indexed_file(
         if i < chunk_result.pairs.len() && i < old_sections.len() {
             let text_raw = &chunk_result.pairs[i].generation;
             let source_hash = content_hash(text_raw);
-            if old_sections[i].source_hash != source_hash {
+            let (offset_start, offset_end) = section_offsets[i];
+            if old_sections[i].source_hash != source_hash
+                || old_sections[i].content_offset_start != offset_start
+                || old_sections[i].content_offset_end != offset_end
+            {
                 let (heading, level) = extract_heading_from_markdown(text_raw);
                 // Section changed, update & mark cards stale
                 crate::db::repos::sections::update(
@@ -101,6 +162,8 @@ pub fn persist_indexed_file(
                     heading.as_deref(),
                     level,
                     &source_hash,
+                    offset_start,
+                    offset_end,
                 ).map_err(|e| AppError::Other(e.to_string()))?;
 
                 crate::db::repos::cards::mark_stale_for_section(&tx, old_sections[i].id.0)
@@ -111,6 +174,7 @@ pub fn persist_indexed_file(
             let text_raw = &chunk_result.pairs[i].generation;
             let source_hash = content_hash(text_raw);
             let (heading, level) = extract_heading_from_markdown(text_raw);
+            let (offset_start, offset_end) = section_offsets[i];
             let _new_sec_id = crate::db::repos::sections::insert_single(
                 &tx,
                 note_id,
@@ -119,6 +183,8 @@ pub fn persist_indexed_file(
                 heading.as_deref(),
                 level,
                 &source_hash,
+                offset_start,
+                offset_end,
             ).map_err(|e| AppError::Other(e.to_string()))?;
 
             // Note: cards are no longer auto-created during indexing,

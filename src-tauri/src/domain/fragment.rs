@@ -45,7 +45,7 @@ pub struct FragmentInsertRow {
     pub fragment_index: i64,
     pub text_clean: String,
     pub source_hash: String,
-    pub tokens: Option<i64>,
+    pub token_count: Option<i64>,
     pub embedding: Vec<u8>,
 }
 

@@ -7,7 +7,7 @@ use crate::domain::search::{SearchHit, ScoredHit};
 #[derive(Debug, Clone)]
 pub struct FragmentWithNote {
     pub fragment: Fragment,
-    pub note_file_path: Option<String>,
+    pub note_path: Option<String>,
     pub note_title: String,
 }
 
@@ -40,7 +40,7 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
                 row.fragment_index,
                 row.text_clean,
                 row.source_hash,
-                row.tokens,
+                row.token_count,
                 row.embedding
             ])?;
         }
@@ -129,7 +129,7 @@ pub fn list_fragments_with_note(
     filter_note_id: Option<i64>,
     include_deleted: bool,
 ) -> Result<Vec<FragmentWithNote>, AppError> {
-    let mut sql = "SELECT frag.fragment_id, NULL AS file_path, frag.fragment_index, frag.text_clean, frag.source_hash, frag.token_count, frag.embedding, frag.note_id, n.title
+    let mut sql = "SELECT frag.fragment_id, n.path_cached, frag.fragment_index, frag.text_clean, frag.source_hash, frag.token_count, frag.embedding, frag.note_id, n.title
                    FROM fragments frag
                    JOIN notes n ON n.note_id = frag.note_id".to_string();
 
@@ -163,7 +163,7 @@ pub fn list_fragments_with_note(
                 token_count: row.get(5)?,
                 embedding: row.get(6)?,
             },
-            note_file_path: row.get(1)?,
+            note_path: row.get(1)?,
             note_title: row.get(8)?,
         })
     })?;
@@ -177,7 +177,7 @@ pub fn search(
 ) -> Result<Vec<ScoredHit>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT frag.fragment_id,
-                NULL AS file_path,
+                n.path_cached,
                 frag.fragment_index,
                 snippet(fragments_fts, 0, '<b>', '</b>', '…', 32),
                 bm25(fragments_fts),
@@ -189,6 +189,8 @@ pub fn search(
          JOIN notes n ON n.note_id = frag.note_id
          WHERE fragments_fts MATCH ?
            AND n.is_deleted = 0
+           AND n.is_draft = 0
+           AND n.is_archived = 0
          ORDER BY bm25(fragments_fts)
          LIMIT ?",
     )?;
@@ -203,7 +205,7 @@ pub fn search(
                 fragment_index: row.get(2)?,
                 text: row.get(7)?,
                 note_title: row.get(5)?,
-                note_file_path: row.get(1)?,
+                note_path: row.get(1)?,
                 snippet: Some(row.get(3)?),
             },
             score,
@@ -270,7 +272,7 @@ pub fn vector_search(
             "SELECT frag.fragment_id, frag.embedding
              FROM fragments frag
              JOIN notes n ON n.note_id = frag.note_id
-             WHERE n.is_deleted = 0",
+             WHERE n.is_deleted = 0 AND n.is_draft = 0 AND n.is_archived = 0",
         )?;
 
         let mut rows = stmt.query([])?;
@@ -300,7 +302,7 @@ pub fn vector_search(
     let in_clause = ids.join(",");
 
     let sql = format!(
-        "SELECT frag.fragment_id, NULL AS file_path, frag.fragment_index, frag.text_clean, n.title, n.note_id
+        "SELECT frag.fragment_id, n.path_cached, frag.fragment_index, frag.text_clean, n.title, n.note_id
          FROM fragments frag
          JOIN notes n ON n.note_id = frag.note_id
          WHERE frag.fragment_id IN ({})",
@@ -335,7 +337,7 @@ pub fn vector_search(
                     fragment_index: idx,
                     text,
                     note_title: Some(title),
-                    note_file_path: path,
+                    note_path: path,
                     snippet: None,
                 },
                 score: h.similarity,

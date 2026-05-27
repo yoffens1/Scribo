@@ -27,11 +27,13 @@ pub fn insert_single(
     heading: Option<&str>,
     heading_level: Option<i64>,
     source_hash: &str,
+    content_offset_start: i64,
+    content_offset_end: i64,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO sections (note_id, section_index, text_raw, heading, heading_level, source_hash)
-         VALUES (?, ?, ?, ?, ?, ?)",
-        rusqlite::params![note_id, index, text_raw, heading, heading_level, source_hash],
+        "INSERT INTO sections (note_id, section_index, text_raw, heading, heading_level, source_hash, content_offset_start, content_offset_end)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![note_id, index, text_raw, heading, heading_level, source_hash, content_offset_start, content_offset_end],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -43,19 +45,21 @@ pub fn update(
     heading: Option<&str>,
     heading_level: Option<i64>,
     source_hash: &str,
+    content_offset_start: i64,
+    content_offset_end: i64,
 ) -> Result<(), AppError> {
     conn.execute(
         "UPDATE sections 
-         SET text_raw = ?, heading = ?, heading_level = ?, source_hash = ? 
+         SET text_raw = ?, heading = ?, heading_level = ?, source_hash = ?, content_offset_start = ?, content_offset_end = ? 
          WHERE section_id = ?",
-        rusqlite::params![text_raw, heading, heading_level, source_hash, section_id],
+        rusqlite::params![text_raw, heading, heading_level, source_hash, content_offset_start, content_offset_end, section_id],
     )?;
     Ok(())
 }
 
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT section_id, note_id, section_index, text_raw, heading, heading_level, source_hash 
+        "SELECT section_id, note_id, section_index, text_raw, heading, heading_level, source_hash, content_offset_start, content_offset_end 
          FROM sections WHERE note_id = ? ORDER BY section_index ASC"
     )?;
     let rows = stmt.query_map([note_id], |row| {
@@ -67,6 +71,8 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, App
             heading: row.get(4)?,
             heading_level: row.get(5)?,
             source_hash: row.get(6)?,
+            content_offset_start: row.get(7)?,
+            content_offset_end: row.get(8)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -74,7 +80,7 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, App
 
 pub fn find_by_id(conn: &Connection, id: SectionId) -> Result<Option<Section>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT section_id, note_id, section_index, text_raw, heading, heading_level, source_hash 
+        "SELECT section_id, note_id, section_index, text_raw, heading, heading_level, source_hash, content_offset_start, content_offset_end 
          FROM sections WHERE section_id = ?"
     )?;
     let mut rows = stmt.query_map([id.0], |row| {
@@ -86,6 +92,8 @@ pub fn find_by_id(conn: &Connection, id: SectionId) -> Result<Option<Section>, A
             heading: row.get(4)?,
             heading_level: row.get(5)?,
             source_hash: row.get(6)?,
+            content_offset_start: row.get(7)?,
+            content_offset_end: row.get(8)?,
         })
     })?;
     if let Some(row) = rows.next() {

@@ -66,7 +66,6 @@ pub struct Note {
     pub title: String,
     pub content: String,           // raw markdown
     pub content_hash: String,      // blake3 от нормализованного content
-    pub tags: Option<String>,
 
     // Иерархия
     pub parent_note_id: Option<NoteId>,
@@ -97,12 +96,58 @@ pub struct Note {
     pub updated_at: Timestamp,
 }
 
+impl Note {
+    /// Заметка участвует в search/RAG/card-generation.
+    pub fn is_indexable(&self) -> bool {
+        !self.is_draft && !self.is_deleted && !self.is_archived
+    }
+
+    /// Заметка видна в дереве repeat-mode.
+    pub fn is_visible_in_tree(&self) -> bool {
+        !self.is_deleted && !self.is_draft
+    }
+
+    /// Заметка — кандидат на distribute (черновик в работе).
+    pub fn is_distributable(&self) -> bool {
+        self.is_draft && !self.is_deleted
+    }
+
+    pub fn summary(&self) -> NoteSummary {
+        NoteSummary {
+            id: self.id,
+            title: self.title.clone(),
+            icon: self.icon.clone(),
+            parent_note_id: self.parent_note_id,
+            path_cached: self.path_cached.clone(),
+            is_draft: self.is_draft,
+            is_pinned: self.is_pinned,
+            mastery: self.mastery,
+            last_studied: self.last_studied,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+/// What the UI sees in lists/trees. No heavy fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteSummary {
+    pub id: NoteId,
+    pub title: String,
+    pub icon: Option<String>,
+    pub parent_note_id: Option<NoteId>,
+    pub path_cached: String,
+    pub is_draft: bool,
+    pub is_pinned: bool,
+    pub mastery: Option<f32>,
+    pub last_studied: Option<Timestamp>,
+    pub updated_at: Timestamp,
+}
+
 /// Input for creating a new note. The repository assigns the id and timestamps.
 #[derive(Debug, Clone, Default)]
 pub struct NewNote {
     pub title: String,
     pub content: String,
-    pub tags: Option<String>,
     pub parent_note_id: Option<NoteId>,
     pub path_cached: Option<String>,
     pub sort_order: Option<i64>,
@@ -121,4 +166,25 @@ pub struct NoteRevision {
     /// diffy-formatted patch transforming previous content into this one.
     pub patch: String,
     pub created_at: Timestamp,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexing_status_serde_matches_as_str() {
+        for s in [
+            IndexingStatus::Pending,
+            IndexingStatus::Indexing,
+            IndexingStatus::Indexed,
+            IndexingStatus::Failed,
+            IndexingStatus::Stale,
+        ] {
+            let json = serde_json::to_string(&s).unwrap();
+            let stripped = json.trim_matches('"');
+            assert_eq!(stripped, s.as_str());
+            assert_eq!(IndexingStatus::parse(s.as_str()), Some(s));
+        }
+    }
 }

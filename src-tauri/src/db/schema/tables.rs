@@ -13,7 +13,6 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              title                TEXT NOT NULL DEFAULT '',
              content              TEXT NOT NULL DEFAULT '',
              content_hash         TEXT NOT NULL DEFAULT '',
-             tags                 TEXT,
 
              -- Иерархия
              parent_note_id       INTEGER REFERENCES notes(note_id) ON DELETE SET NULL,
@@ -41,7 +40,9 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              last_studied         INTEGER,
 
              created_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-             updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+             updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+
+             CHECK (parent_note_id IS NULL OR parent_note_id <> note_id)
           );
 
           CREATE TABLE IF NOT EXISTS fragments (
@@ -63,6 +64,8 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              heading TEXT,
              heading_level INTEGER,
              source_hash TEXT NOT NULL,
+             content_offset_start INTEGER NOT NULL DEFAULT 0,
+             content_offset_end INTEGER NOT NULL DEFAULT 0,
              created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              UNIQUE(note_id, section_index)
           );
@@ -103,6 +106,17 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
              patch TEXT NOT NULL,
              created_at INTEGER NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS distribution_runs (
+             run_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+             draft_id            INTEGER NOT NULL,
+             plan_json           TEXT NOT NULL,
+             result_json         TEXT,
+             generator_version   TEXT NOT NULL,
+             status              TEXT NOT NULL CHECK (status IN ('analyzed', 'applied', 'cancelled')),
+             created_at          INTEGER NOT NULL,
+             applied_at          INTEGER
           );
 
           CREATE TABLE IF NOT EXISTS review_logs (
