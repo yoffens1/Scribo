@@ -14,7 +14,8 @@ pub async fn analyze_draft_for_distribution(
     })?.ok_or_else(|| AppError::Other(format!("Draft note not found: {}", draft_id)))?;
 
     // 1. Semantic Chunker
-    println!("[Chunker] Starting semantic chunking of note ID {}...", draft_id);
+    println!("[Analyze] Loaded note to distribute (ID: {}):\n---\n{}\n---", draft_id, note.content);
+    println!("[Chunker] Starting semantic chunking...");
     let chunker = SemanticChunker::new(800, 0.7);
     let chunks = chunker.chunk(&note.content, llm_service).await;
     if chunks.is_empty() {
@@ -24,7 +25,10 @@ pub async fn analyze_draft_for_distribution(
             chunks: Vec::new(),
         });
     }
-    println!("[Chunker] Successfully split note into {} chunk(s).", chunks.len());
+    println!("[Chunker] Successfully split note into {} chunk(s):", chunks.len());
+    for (i, chunk) in chunks.iter().enumerate() {
+        println!("  Chunk #{}: (Suggested Title: \"{}\")\n  ---\n  {}\n  ---", i + 1, chunk.suggested_title, chunk.text.replace("\n", "\n  "));
+    }
 
     // 2. Parallel Retrieval
     println!("[Retriever] Querying vector database for similar candidate notes...");
@@ -44,6 +48,15 @@ pub async fn analyze_draft_for_distribution(
             Ok(cands) => cands.clone(),
             Err(_) => Vec::new(),
         };
+
+        println!("  Candidates for Chunk #{}:", idx + 1);
+        if candidates.is_empty() {
+            println!("    None");
+        } else {
+            for c in &candidates {
+                println!("    - Note ID: {}, Title: \"{}\", Similarity: {:.4}", c.note_id, c.title, c.similarity);
+            }
+        }
 
         let candidates_str = if candidates.is_empty() {
             "None".to_string()
