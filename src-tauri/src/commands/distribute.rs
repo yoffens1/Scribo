@@ -1,7 +1,8 @@
 use crate::DbState;
 use crate::error::AppError;
 use crate::ai::{LlmConfig, LlmService};
-use crate::services::distribute::{DraftDistributionPlan, analyze_draft_for_distribution, apply_distribution};
+use crate::domain::distribute::DraftDistributionPlan;
+use crate::services::distribute::{analyze_draft_for_distribution, apply_distribution};
 
 #[tauri::command]
 pub async fn distribute_analyze_draft(

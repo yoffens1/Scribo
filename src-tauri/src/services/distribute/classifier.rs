@@ -1,4 +1,22 @@
-use super::types::ChunkDistributionPlan;
+use crate::domain::distribute::ChunkDistributionPlan;
+
+pub trait Classifier: Send + Sync {
+    fn classify(&self, chunks: &mut [ChunkDistributionPlan]);
+}
+
+pub struct HeuristicClassifier;
+
+impl HeuristicClassifier {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Classifier for HeuristicClassifier {
+    fn classify(&self, chunks: &mut [ChunkDistributionPlan]) {
+        apply_heuristic_linking(chunks);
+    }
+}
 
 pub fn apply_heuristic_linking(chunks: &mut [ChunkDistributionPlan]) {
     let mut new_notes: Vec<(usize, String)> = Vec::new();

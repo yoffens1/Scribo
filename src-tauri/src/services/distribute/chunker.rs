@@ -1,5 +1,25 @@
 use pulldown_cmark::{Event, Tag, HeadingLevel, Options, Parser};
-use super::types::{TopicChunk, RawBlock};
+use crate::domain::distribute::{TopicChunk, RawBlock};
+
+pub trait Chunker: Send + Sync {
+    fn chunk(&self, content: &str) -> Vec<TopicChunk>;
+}
+
+pub struct RuleChunker {
+    pub max_chars: usize,
+}
+
+impl RuleChunker {
+    pub fn new(max_chars: usize) -> Self {
+        Self { max_chars }
+    }
+}
+
+impl Chunker for RuleChunker {
+    fn chunk(&self, content: &str) -> Vec<TopicChunk> {
+        split_into_topics(content, self.max_chars)
+    }
+}
 
 pub fn parse_raw_blocks(content: &str) -> Vec<RawBlock> {
     let options = Options::all();
@@ -153,4 +173,28 @@ pub fn split_into_topics(content: &str, max_chars: usize) -> Vec<TopicChunk> {
     }
     
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_into_topics() {
+        let content = "\
+# Math Note
+This is some content.
+
+## Section 2
+And some more content here.
+- Item 1
+- Item 2
+";
+        let chunks = split_into_topics(content, 1000);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].suggested_title, "Math Note");
+        assert!(chunks[0].text.contains("This is some content."));
+        assert_eq!(chunks[1].suggested_title, "Section 2");
+        assert!(chunks[1].text.contains("Item 2"));
+    }
 }

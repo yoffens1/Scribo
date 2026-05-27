@@ -6,7 +6,6 @@ pub mod services;
 pub mod fragmenter;
 pub mod db;
 pub mod ai;
-pub mod refinery;
 pub mod retrieval;
 pub mod logging;
 
@@ -36,7 +35,6 @@ pub fn run() {
             commands::ai::ai_generate_embeddings,
             commands::ai::ai_list_local_models,
             commands::ai::ai_local_unload_model,
-            commands::refinery::refinery_run_pipeline,
             commands::search::notesearch_fuzzy,
             commands::search::translation_translate,
             commands::search::retrieval_detect_language,
@@ -52,6 +50,8 @@ pub fn run() {
             commands::reviewer::reviewer_get_repeat_mode_tree,
             commands::distribute::distribute_analyze_draft,
             commands::distribute::distribute_apply_plan,
+            commands::fragmenter::fragment_text_paired,
+            commands::fragmenter::count_text_tokens,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
