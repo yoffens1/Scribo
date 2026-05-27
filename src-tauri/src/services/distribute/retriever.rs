@@ -45,7 +45,7 @@ impl Retriever for VectorRetriever {
 
         let embedding_bytes = bytemuck::cast_slice::<f32, u8>(&embedding);
         let scored_hits = state.with_conn(|conn| {
-            crate::db::repos::fragments::vector_search(conn, embedding_bytes, 10)
+            crate::db::repos::fragments::vector_search(conn, embedding_bytes, Some(0), 10)
         })?;
 
         // Keep a map of note_id -> title for reconstruction

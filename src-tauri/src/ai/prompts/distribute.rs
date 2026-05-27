@@ -31,6 +31,7 @@ pub fn build_batch_distribute_prompt(chunks: &[(&str, &str, &str)]) -> String {
            \"parent_note_id\": null or number,\n\
            \"parent_chunk_index\": null or number,\n\
            \"merge_target_chunk_index\": null or number,\n\
+           \"tags\": null or array of strings (e.g. [\"#Chemistry/Microscope/Atom\", \"#important\"]),\n\
            \"reason\": \"a brief explanation for this recommendation\"\n\
          }}\n\n\
          Respond ONLY with a valid JSON array of objects. Do not include markdown code block formatting (e.g. do not wrap in ```json).",

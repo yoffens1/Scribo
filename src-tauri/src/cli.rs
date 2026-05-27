@@ -233,7 +233,7 @@ pub fn handle_cli(args: Vec<String>) {
             let note = crate::domain::note::NewNote {
                 title,
                 content: content.clone(),
-                is_draft: true,
+                lifecycle: Some(crate::domain::note::NoteLifecycle::Draft),
                 ..Default::default()
             };
             let note_id = crate::db::repos::notes::insert(&conn, &note).unwrap();
@@ -329,15 +329,26 @@ pub fn handle_cli(args: Vec<String>) {
                 for (i, chunk) in plan.chunks.iter().enumerate() {
                     println!("\nChunk {}: Suggested Title: \"{}\"", i + 1, chunk.suggested_title);
                     println!("Text:\n  {}", chunk.text.replace("\n", "\n  "));
-                    println!("Recommendation: Action = \"{}\"", chunk.recommendation.action);
-                    if let Some(target) = chunk.recommendation.target_note_id {
-                        println!("  Target Note ID: {}", target);
-                    }
-                    if let Some(ref title) = chunk.recommendation.new_note_title {
-                        println!("  New Note Title: \"{}\"", title);
-                    }
-                    if let Some(parent) = chunk.recommendation.parent_note_id {
-                        println!("  Parent Note ID: {}", parent);
+                    println!("Recommendation: Action = \"{:?}\"", chunk.recommendation.action);
+                    match &chunk.recommendation.action {
+                        crate::domain::distribute::DistributeAction::Append { target_note_id, target_section_id } => {
+                            println!("  Target Note ID: {}", target_note_id.0);
+                            if let Some(sec_id) = target_section_id {
+                                println!("  Target Section ID: {}", sec_id.0);
+                            }
+                        }
+                        crate::domain::distribute::DistributeAction::CreateChild { parent_note_id, new_note_title } => {
+                            println!("  New Note Title: \"{}\"", new_note_title);
+                            if let Some(parent) = parent_note_id {
+                                println!("  Parent Note ID: {}", parent.0);
+                            }
+                        }
+                        crate::domain::distribute::DistributeAction::MergeWithChunk { chunk_index } => {
+                            println!("  Merge with Chunk Index: {}", chunk_index);
+                        }
+                        crate::domain::distribute::DistributeAction::Skip { reason } => {
+                            println!("  Skip Reason: {}", reason);
+                        }
                     }
                     println!("  Reason: {}", chunk.recommendation.reason);
                 }

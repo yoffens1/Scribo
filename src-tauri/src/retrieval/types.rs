@@ -57,6 +57,7 @@ pub struct RetrieveFilters {
 pub struct RetrieveOptions {
     pub top_k: Option<usize>,
     pub filters: Option<RetrieveFilters>,
+    pub target_level: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

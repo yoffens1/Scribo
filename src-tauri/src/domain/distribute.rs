@@ -22,13 +22,30 @@ pub struct CandidateNote {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum DistributeAction {
+    Append { 
+        target_note_id: crate::domain::NoteId,
+        target_section_id: Option<crate::domain::SectionId>,
+    },
+    CreateChild { 
+        parent_note_id: Option<crate::domain::NoteId>,
+        new_note_title: String,
+    },
+    MergeWithChunk { 
+        chunk_index: usize,
+    },
+    Skip { 
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmRecommendation {
-    pub action: String, // "append" | "create_child" | "merge_with_chunk" | "skip"
-    pub target_note_id: Option<i64>,
-    pub new_note_title: Option<String>,
-    pub parent_note_id: Option<i64>,
-    pub parent_chunk_index: Option<usize>,
-    pub merge_target_chunk_index: Option<usize>,
+    #[serde(flatten)]
+    pub action: DistributeAction,
+    pub tags: Option<Vec<String>>,
+    pub confidence: Option<f32>,
     pub reason: String,
 }
 
@@ -45,14 +62,4 @@ pub struct ChunkDistributionPlan {
 pub struct DraftDistributionPlan {
     pub draft_id: i64,
     pub chunks: Vec<ChunkDistributionPlan>,
-}
-
-pub fn extract_json_payload(raw: &str) -> Option<String> {
-    let start_idx = raw.find('{')?;
-    let end_idx = raw.rfind('}')?;
-    if end_idx > start_idx {
-        Some(raw[start_idx..=end_idx].to_string())
-    } else {
-        None
-    }
 }

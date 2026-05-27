@@ -46,15 +46,17 @@ pub async fn reviewer_get_card(
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Card not found".to_string())?;
 
-        let section = crate::db::repos::sections::find_by_id(conn, card.section_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Section not found".to_string())?;
+        let section = match card.section_id {
+            Some(sid) => crate::db::repos::sections::find_by_id(conn, sid)
+                .map_err(|e| e.to_string())?,
+            None => None,
+        };
 
-        let note = crate::db::repos::notes::get_by_id(conn, section.note_id.0)
+        let note = crate::db::repos::notes::get_by_id(conn, card.note_id.0)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Note not found".to_string())?;
 
-        let rendered = card.render(&section, note.id, note.title, note.path_cached);
+        let rendered = card.render(section.as_ref(), note.id, note.title, note.path_cached);
         Ok(rendered)
     }).map_err(|e: crate::AppError| e.to_string())
 }
@@ -68,16 +70,24 @@ pub async fn reviewer_upgrade_card_front_with_ai(
 ) -> Result<String, String> {
     let service = crate::ai::LlmService::new(config, Some(app));
     
-    let (card, section) = state.with_conn(|conn| {
+    let (card, section_text) = state.with_conn(|conn| {
         let card = crate::db::repos::cards::find_by_id(conn, crate::domain::CardId(card_id))
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Card not found".to_string())?;
 
-        let section = crate::db::repos::sections::find_by_id(conn, card.section_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Section not found".to_string())?;
+        let section_text = match card.section_id {
+            Some(sid) => {
+                let section = crate::db::repos::sections::find_by_id(conn, sid)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "Section not found".to_string())?;
+                section.text_raw
+            }
+            None => {
+                card.last_section_snapshot.clone().unwrap_or_default()
+            }
+        };
 
-        Ok((card, section))
+        Ok((card, section_text))
     }).map_err(|e: crate::AppError| e.to_string())?;
 
     let prompt = format!(
@@ -85,7 +95,7 @@ pub async fn reviewer_upgrade_card_front_with_ai(
          The question should be direct and test the reader's understanding of the core concepts in the text.\n\n\
          Text:\n```\n{}\n```\n\n\
          Output only the question and nothing else. Do not include any greeting, markdown formatting (like bolding), or introductory phrases.",
-        section.text_raw
+        section_text
     );
 
     let messages = vec![crate::ai::types::Message {
@@ -101,9 +111,9 @@ pub async fn reviewer_upgrade_card_front_with_ai(
             conn,
             card.id.0,
             Some(&generated_question),
-            Some(&section.text_raw),
-            card.is_suspended,
-            false,
+            Some(&section_text),
+            card.status,
+            card.last_section_snapshot.as_deref(),
         )?;
 
         conn.execute(

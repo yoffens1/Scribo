@@ -29,9 +29,7 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              embedding_dimension  INTEGER,
              indexing_version     TEXT,
 
-             is_draft             INTEGER NOT NULL DEFAULT 0,
-             is_archived          INTEGER NOT NULL DEFAULT 0,
-             is_deleted           INTEGER NOT NULL DEFAULT 0,
+             lifecycle            TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle IN ('draft', 'active', 'archived', 'deleted')),
              is_pinned            INTEGER NOT NULL DEFAULT 0,
              is_favorite          INTEGER NOT NULL DEFAULT 0,
 
@@ -45,43 +43,63 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              CHECK (parent_note_id IS NULL OR parent_note_id <> note_id)
           );
 
-          CREATE TABLE IF NOT EXISTS fragments (
-             fragment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-             note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
-             fragment_index INTEGER NOT NULL,
-             text_clean TEXT NOT NULL,
-             source_hash TEXT NOT NULL,
-             embedding BLOB,
-             token_count INTEGER,
-             UNIQUE(note_id, fragment_index)
+          CREATE TABLE IF NOT EXISTS chunks (
+             chunk_id                INTEGER PRIMARY KEY AUTOINCREMENT,
+             note_id                 INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+             parent_chunk_id         INTEGER REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+             level                   INTEGER NOT NULL,           -- 0 = section, 1 = fragment
+             order_index             INTEGER NOT NULL,
+             
+             raw_text                TEXT NOT NULL,
+             raw_text_hash           TEXT NOT NULL,
+             clean_text              TEXT NOT NULL,
+             clean_text_hash         TEXT NOT NULL,
+             
+             embedding               BLOB,
+             embedding_source        TEXT,                  -- 'direct' | 'mean_pool' | 'summary' | 'contextual'
+             embedding_model         TEXT,
+             embedding_model_version TEXT,
+             embedded_at             INTEGER,
+             
+             -- section metadata (level=0)
+             heading                 TEXT,
+             heading_level           INTEGER,
+             content_offset_start    INTEGER NOT NULL DEFAULT 0,
+             content_offset_end      INTEGER NOT NULL DEFAULT 0,
+             
+             -- fragment metadata (level=1)
+             token_count             INTEGER,
+             
+             -- general
+             kind                    TEXT NOT NULL DEFAULT 'fragment',
+             deleted_at              INTEGER,
+             created_at              INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+             updated_at              INTEGER NOT NULL DEFAULT (strftime('%s','now'))
           );
 
-          CREATE TABLE IF NOT EXISTS sections (
-             section_id INTEGER PRIMARY KEY AUTOINCREMENT,
-             note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
-             section_index INTEGER NOT NULL,
-             text_raw TEXT NOT NULL,
-             heading TEXT,
-             heading_level INTEGER,
-             source_hash TEXT NOT NULL,
-             content_offset_start INTEGER NOT NULL DEFAULT 0,
-             content_offset_end INTEGER NOT NULL DEFAULT 0,
-             created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-             UNIQUE(note_id, section_index)
+          CREATE TABLE IF NOT EXISTS embedding_cache (
+             clean_text_hash         TEXT NOT NULL,
+             embedding_model         TEXT NOT NULL,
+             embedding_model_version TEXT NOT NULL,
+             embedding               BLOB NOT NULL,
+             created_at              INTEGER NOT NULL,
+             PRIMARY KEY (clean_text_hash, embedding_model, embedding_model_version)
           );
 
           CREATE TABLE IF NOT EXISTS cards (
              card_id INTEGER PRIMARY KEY AUTOINCREMENT,
-             section_id INTEGER NOT NULL REFERENCES sections(section_id) ON DELETE CASCADE,
+             note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+             chunk_id INTEGER REFERENCES chunks(chunk_id) ON DELETE SET NULL,
              card_type TEXT NOT NULL DEFAULT 'heading'
                  CHECK (card_type IN ('heading', 'qa', 'cloze', 'manual')),
              custom_front TEXT,
              custom_back TEXT,
              cloze_mask TEXT,
-             is_stale INTEGER NOT NULL DEFAULT 0,
-             is_suspended INTEGER NOT NULL DEFAULT 0,
+             status TEXT NOT NULL DEFAULT 'fresh'
+                 CHECK (status IN ('fresh', 'stale', 'orphaned', 'suspended')),
+             last_section_snapshot TEXT,
              generated_by TEXT,
-             section_hash_at_creation TEXT,
+             source_raw_hash_at_creation TEXT,
              created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
           );
@@ -129,25 +147,25 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              elapsed_days INTEGER
           );
 
-          CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
-             text_clean,
-             content='fragments',
-             content_rowid='fragment_id',
+          CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+             clean_text,
+             content='chunks',
+             content_rowid='chunk_id',
              tokenize = 'unicode61 remove_diacritics 2'
           );
 
           -- Triggers
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments BEGIN
-             INSERT INTO fragments_fts(rowid, text_clean) VALUES (NEW.fragment_id, NEW.text_clean);
+          CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks WHEN NEW.level = 1 BEGIN
+             INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments BEGIN
-             INSERT INTO fragments_fts(fragments_fts, rowid, text_clean) VALUES('delete', OLD.fragment_id, OLD.text_clean);
+          CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks WHEN OLD.level = 1 BEGIN
+             INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF text_clean ON fragments BEGIN
-             INSERT INTO fragments_fts(fragments_fts, rowid, text_clean) VALUES('delete', OLD.fragment_id, OLD.text_clean);
-             INSERT INTO fragments_fts(rowid, text_clean) VALUES (NEW.fragment_id, NEW.text_clean);
+          CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE OF clean_text ON chunks WHEN NEW.level = 1 BEGIN
+             INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
+             INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
           END;
 
           CREATE TRIGGER IF NOT EXISTS schedules_cascade_card_delete
@@ -194,24 +212,89 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              END;
           END;
 
+          CREATE TRIGGER IF NOT EXISTS chunks_orphaning_cards
+          BEFORE DELETE ON chunks
+          FOR EACH ROW
+          BEGIN
+             UPDATE cards
+             SET status = 'orphaned',
+                 last_section_snapshot = OLD.raw_text
+             WHERE chunk_id = OLD.chunk_id;
+          END;
+
           -- Indexes
           CREATE INDEX IF NOT EXISTS idx_notes_indexing_status ON notes(indexing_status)
               WHERE indexing_status != 'indexed';
           CREATE INDEX IF NOT EXISTS idx_notes_active ON notes(updated_at DESC)
-              WHERE is_deleted = 0 AND is_archived = 0;
-          CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_note_id) WHERE is_deleted = 0;
+              WHERE lifecycle = 'active';
+          CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_note_id) WHERE lifecycle != 'deleted';
           CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path_cached);
-          CREATE INDEX IF NOT EXISTS idx_notes_drafts ON notes(updated_at DESC) WHERE is_draft = 1;
-          CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(updated_at DESC) WHERE is_pinned = 1 AND is_deleted = 0;
+          CREATE INDEX IF NOT EXISTS idx_notes_drafts ON notes(updated_at DESC) WHERE lifecycle = 'draft';
+          CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(updated_at DESC) WHERE is_pinned = 1 AND lifecycle != 'deleted';
 
-          CREATE INDEX IF NOT EXISTS idx_fragments_note_id ON fragments(note_id);
-          CREATE INDEX IF NOT EXISTS idx_sections_note_id ON sections(note_id);
-          CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(section_id);
+          CREATE INDEX IF NOT EXISTS idx_chunks_note_level ON chunks(note_id, level);
+          CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_chunk_id);
+          CREATE INDEX IF NOT EXISTS idx_chunks_clean_hash ON chunks(clean_text_hash);
+          CREATE INDEX IF NOT EXISTS idx_chunks_embedded_alive ON chunks(level) WHERE deleted_at IS NULL AND embedding IS NOT NULL;
+          
+          CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(chunk_id);
           CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules (next_review) WHERE next_review IS NOT NULL;
           CREATE INDEX IF NOT EXISTS idx_schedules_target ON schedules (target_type, target_id);
           CREATE INDEX IF NOT EXISTS idx_review_logs_schedule ON review_logs(schedule_id);
-          CREATE INDEX IF NOT EXISTS idx_cards_stale ON cards(section_id) WHERE is_stale = 1;
-          CREATE INDEX IF NOT EXISTS idx_cards_not_suspended ON cards(section_id) WHERE is_suspended = 0;
+          CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status);
+          CREATE INDEX IF NOT EXISTS idx_cards_active ON cards(chunk_id) WHERE status != 'suspended';
+
+          -- Tag System
+          CREATE TABLE IF NOT EXISTS tags (
+              tag_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              parent_tag_id   INTEGER REFERENCES tags(tag_id) ON DELETE CASCADE,
+              name            TEXT NOT NULL,
+              slug            TEXT NOT NULL,
+              color           TEXT,
+              icon            TEXT,
+              depth           INTEGER NOT NULL DEFAULT 0,
+              path_cached     TEXT NOT NULL,
+              description     TEXT,
+              created_at      INTEGER NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              CHECK (parent_tag_id IS NULL OR parent_tag_id <> tag_id)
+          );
+
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_root_slug ON tags(slug) WHERE parent_tag_id IS NULL;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_child_slug ON tags(parent_tag_id, slug) WHERE parent_tag_id IS NOT NULL;
+          CREATE INDEX IF NOT EXISTS idx_tags_parent ON tags(parent_tag_id);
+          CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
+          CREATE INDEX IF NOT EXISTS idx_tags_path ON tags(path_cached);
+
+          CREATE TABLE IF NOT EXISTS tag_closure (
+              ancestor_id   INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+              descendant_id INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+              depth         INTEGER NOT NULL,
+              PRIMARY KEY (ancestor_id, descendant_id)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_tag_closure_desc ON tag_closure(descendant_id);
+
+          CREATE TABLE IF NOT EXISTS note_tags (
+              note_id     INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+              tag_id      INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+              source      TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'ai', 'inherited')),
+              confidence  REAL,
+              created_at  INTEGER NOT NULL,
+              PRIMARY KEY (note_id, tag_id)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag_id);
+
+          CREATE TABLE IF NOT EXISTS chunk_tags (
+              chunk_id    INTEGER NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+              tag_id      INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+              source      TEXT NOT NULL DEFAULT 'inherited' CHECK (source IN ('manual', 'ai', 'inherited')),
+              created_at  INTEGER NOT NULL,
+              PRIMARY KEY (chunk_id, tag_id)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_chunk_tags_tag ON chunk_tags(tag_id);
          "
     )?;
     Ok(())

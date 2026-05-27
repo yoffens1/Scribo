@@ -13,7 +13,7 @@ pub struct FragmentWithNote {
 
 pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
-        "DELETE FROM fragments WHERE note_id = ?",
+        "DELETE FROM chunks WHERE note_id = ? AND level = 1",
         rusqlite::params![note_id],
     )?;
     Ok(deleted as i64)
@@ -21,7 +21,7 @@ pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppErro
 
 pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     conn.execute(
-        "DELETE FROM fragments WHERE fragment_id = ?",
+        "DELETE FROM chunks WHERE chunk_id = ? AND level = 1",
         rusqlite::params![id],
     )?;
     Ok(())
@@ -31,15 +31,17 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, kind)
+             VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, 'fragment')",
         )?;
         for row in &rows {
             stmt.execute(rusqlite::params![
                 note_id,
                 row.fragment_index,
                 row.text_clean,
-                row.source_hash,
+                row.clean_hash,
+                row.text_clean,
+                row.clean_hash,
                 row.token_count,
                 row.embedding
             ])?;
@@ -51,16 +53,18 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
 
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Fragment>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT fragment_id, note_id, fragment_index, text_clean, source_hash, token_count, embedding
-         FROM fragments WHERE note_id = ? ORDER BY fragment_index ASC"
+        "SELECT chunk_id, note_id, order_index, clean_text, clean_text_hash, token_count, embedding, parent_chunk_id
+         FROM chunks WHERE note_id = ? AND level = 1 ORDER BY order_index ASC"
     )?;
     let rows = stmt.query_map([note_id], |row| {
+        let parent_chunk_id: Option<i64> = row.get(7)?;
         Ok(Fragment {
             id: FragmentId(row.get(0)?),
             note_id: NoteId(row.get(1)?),
+            section_id: parent_chunk_id.map(crate::domain::SectionId),
             fragment_index: row.get(2)?,
             text_clean: row.get(3)?,
-            source_hash: row.get(4)?,
+            clean_hash: row.get(4)?,
             token_count: row.get(5)?,
             embedding: row.get(6)?,
         })
@@ -73,22 +77,23 @@ pub fn update(
     note_id: i64,
     index: i64,
     text_clean: &str,
-    source_hash: &str,
+    clean_hash: &str,
     clear_embedding: bool,
+    parent_chunk_id: Option<i64>,
 ) -> Result<(), AppError> {
     if clear_embedding {
         conn.execute(
-            "UPDATE fragments 
-             SET text_clean = ?, source_hash = ?, embedding = zeroblob(0) 
-             WHERE note_id = ? AND fragment_index = ?",
-            rusqlite::params![text_clean, source_hash, note_id, index],
+            "UPDATE chunks 
+             SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, embedding = NULL, parent_chunk_id = ? 
+             WHERE note_id = ? AND order_index = ? AND level = 1",
+            rusqlite::params![text_clean, clean_hash, text_clean, clean_hash, parent_chunk_id, note_id, index],
         )?;
     } else {
         conn.execute(
-            "UPDATE fragments 
-             SET text_clean = ?, source_hash = ? 
-             WHERE note_id = ? AND fragment_index = ?",
-            rusqlite::params![text_clean, source_hash, note_id, index],
+            "UPDATE chunks 
+             SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, parent_chunk_id = ? 
+             WHERE note_id = ? AND order_index = ? AND level = 1",
+            rusqlite::params![text_clean, clean_hash, text_clean, clean_hash, parent_chunk_id, note_id, index],
         )?;
     }
     Ok(())
@@ -99,16 +104,17 @@ pub fn insert_single(
     note_id: i64,
     index: i64,
     text_clean: &str,
-    source_hash: &str,
+    clean_hash: &str,
     token_count: Option<i64>,
     embedding: &[u8],
-) -> Result<(), AppError> {
+    parent_chunk_id: Option<i64>,
+) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding)
-         VALUES (?, ?, ?, ?, ?, ?)",
-        rusqlite::params![note_id, index, text_clean, source_hash, token_count, embedding],
+        "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, parent_chunk_id, kind)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'fragment')",
+        rusqlite::params![note_id, index, text_clean, clean_hash, text_clean, clean_hash, token_count, embedding, parent_chunk_id],
     )?;
-    Ok(())
+    Ok(conn.last_insert_rowid())
 }
 
 pub fn set_embedding(
@@ -118,7 +124,7 @@ pub fn set_embedding(
     embedding: &[u8],
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE fragments SET embedding = ? WHERE note_id = ? AND fragment_index = ?",
+        "UPDATE chunks SET embedding = ? WHERE note_id = ? AND order_index = ? AND level = 1",
         rusqlite::params![embedding, note_id, index],
     )?;
     Ok(())
@@ -129,15 +135,16 @@ pub fn list_fragments_with_note(
     filter_note_id: Option<i64>,
     include_deleted: bool,
 ) -> Result<Vec<FragmentWithNote>, AppError> {
-    let mut sql = "SELECT frag.fragment_id, n.path_cached, frag.fragment_index, frag.text_clean, frag.source_hash, frag.token_count, frag.embedding, frag.note_id, n.title
-                   FROM fragments frag
-                   JOIN notes n ON n.note_id = frag.note_id".to_string();
+    let mut sql = "SELECT frag.chunk_id, n.path_cached, frag.order_index, frag.clean_text, frag.clean_text_hash, frag.token_count, frag.embedding, frag.note_id, n.title, frag.parent_chunk_id
+                   FROM chunks frag
+                   JOIN notes n ON n.note_id = frag.note_id
+                   WHERE frag.level = 1".to_string();
 
     let mut conditions = Vec::new();
     let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::new();
 
     if !include_deleted {
-        conditions.push("n.is_deleted = 0");
+        conditions.push("n.lifecycle != 'deleted'");
     }
     if let Some(ref note_id) = filter_note_id {
         conditions.push("n.note_id = ?");
@@ -145,21 +152,23 @@ pub fn list_fragments_with_note(
     }
 
     if !conditions.is_empty() {
-        sql.push_str(" WHERE ");
+        sql.push_str(" AND ");
         sql.push_str(&conditions.join(" AND "));
     }
 
-    sql.push_str(" ORDER BY n.note_id, frag.fragment_index");
+    sql.push_str(" ORDER BY n.note_id, frag.order_index");
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        let parent_chunk_id: Option<i64> = row.get(9)?;
         Ok(FragmentWithNote {
             fragment: Fragment {
                 id: FragmentId(row.get(0)?),
                 note_id: NoteId(row.get(7)?),
+                section_id: parent_chunk_id.map(crate::domain::SectionId),
                 fragment_index: row.get(2)?,
                 text_clean: row.get(3)?,
-                source_hash: row.get(4)?,
+                clean_hash: row.get(4)?,
                 token_count: row.get(5)?,
                 embedding: row.get(6)?,
             },
@@ -176,22 +185,21 @@ pub fn search(
     limit: i64,
 ) -> Result<Vec<ScoredHit>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT frag.fragment_id,
+        "SELECT frag.chunk_id,
                 n.path_cached,
-                frag.fragment_index,
-                snippet(fragments_fts, 0, '<b>', '</b>', '…', 32),
-                bm25(fragments_fts),
+                frag.order_index,
+                snippet(chunks_fts, 0, '<b>', '</b>', '…', 32),
+                bm25(chunks_fts),
                 n.title,
                 n.note_id,
-                frag.text_clean
-         FROM fragments_fts
-         JOIN fragments frag ON frag.fragment_id = fragments_fts.rowid
+                frag.clean_text
+         FROM chunks_fts
+         JOIN chunks frag ON frag.chunk_id = chunks_fts.rowid
          JOIN notes n ON n.note_id = frag.note_id
-         WHERE fragments_fts MATCH ?
-           AND n.is_deleted = 0
-           AND n.is_draft = 0
-           AND n.is_archived = 0
-         ORDER BY bm25(fragments_fts)
+         WHERE chunks_fts MATCH ?
+           AND frag.level = 1
+           AND n.lifecycle = 'active'
+         ORDER BY bm25(chunks_fts)
          LIMIT ?",
     )?;
     let rows = stmt.query_map(rusqlite::params![query, limit], |row| {
@@ -204,7 +212,7 @@ pub fn search(
                 note_id,
                 fragment_index: row.get(2)?,
                 text: row.get(7)?,
-                note_title: row.get(5)?,
+                note_title: Some(row.get(5)?),
                 note_path: row.get(1)?,
                 snippet: Some(row.get(3)?),
             },
@@ -261,6 +269,7 @@ impl Ord for HitRecord {
 pub fn vector_search(
     conn: &Connection,
     query_embedding_bytes: &[u8],
+    level: Option<i64>,
     limit: usize,
 ) -> Result<Vec<ScoredHit>, AppError> {
     let query_vector = bytes_to_f32_slice(query_embedding_bytes);
@@ -268,12 +277,21 @@ pub fn vector_search(
     let mut top_hits = std::collections::BinaryHeap::with_capacity(limit + 1);
 
     {
-        let mut stmt = conn.prepare(
-            "SELECT frag.fragment_id, frag.embedding
-             FROM fragments frag
+        let sql = if let Some(l) = level {
+            format!(
+                "SELECT frag.chunk_id, frag.embedding
+                 FROM chunks frag
+                 JOIN notes n ON n.note_id = frag.note_id
+                 WHERE frag.level = {} AND n.lifecycle = 'active'",
+                l
+            )
+        } else {
+            "SELECT frag.chunk_id, frag.embedding
+             FROM chunks frag
              JOIN notes n ON n.note_id = frag.note_id
-             WHERE n.is_deleted = 0 AND n.is_draft = 0 AND n.is_archived = 0",
-        )?;
+             WHERE n.lifecycle = 'active'".to_string()
+        };
+        let mut stmt = conn.prepare(&sql)?;
 
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
@@ -302,10 +320,10 @@ pub fn vector_search(
     let in_clause = ids.join(",");
 
     let sql = format!(
-        "SELECT frag.fragment_id, n.path_cached, frag.fragment_index, frag.text_clean, n.title, n.note_id
-         FROM fragments frag
+        "SELECT frag.chunk_id, n.path_cached, frag.order_index, frag.clean_text, n.title, n.note_id
+         FROM chunks frag
          JOIN notes n ON n.note_id = frag.note_id
-         WHERE frag.fragment_id IN ({})",
+         WHERE frag.chunk_id IN ({})",
          in_clause
     );
 

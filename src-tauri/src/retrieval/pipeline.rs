@@ -44,7 +44,7 @@ pub fn default_synonyms() -> HashMap<String, Vec<String>> {
 
 fn get_vault_language(state: &DbState) -> String {
     let fragments = state.with_conn(|conn| {
-        let mut stmt = conn.prepare("SELECT fragment_text FROM fragments WHERE fragment_text IS NOT NULL LIMIT 50")?;
+        let mut stmt = conn.prepare("SELECT clean_text FROM chunks WHERE level = 1 AND clean_text IS NOT NULL LIMIT 50")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut res = Vec::new();
         for r in rows {
@@ -269,7 +269,7 @@ pub async fn retrieve(
 
             if let Some(emb) = emb_to_use {
                 let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
-                if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
+                if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, options.target_level, over_fetch)) {
                     vector_results = hits.into_iter().map(|h| SearchResult {
                         fragment_ref: FragmentRef {
                             note_id: h.hit.note_id,
@@ -306,7 +306,7 @@ pub async fn retrieve(
             if let Ok(embs) = llm.generate_embeddings(vec![hyde.text.clone()]).await {
                 if let Some(emb) = embs.into_iter().next() {
                     let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
-                    if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
+                    if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, options.target_level, over_fetch)) {
                         let hyde_results: Vec<SearchResult> = hits.into_iter().map(|h| SearchResult {
                             fragment_ref: FragmentRef {
                                 note_id: h.hit.note_id,

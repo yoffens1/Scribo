@@ -11,8 +11,8 @@ pub use apply::apply_distribution;
 pub use refresh_cards::refresh_stale_cards_for_notes;
 
 use crate::error::AppError;
-use crate::ai::LlmService;
-use crate::domain::distribute::{DraftDistributionPlan, ChunkDistributionPlan, LlmRecommendation, extract_json_payload};
+use crate::ai::{LlmService, extract_json_payload};
+use crate::domain::distribute::{DraftDistributionPlan, ChunkDistributionPlan, LlmRecommendation, DistributeAction};
 use std::sync::Arc;
 
 pub async fn analyze_draft_for_distribution(
@@ -86,13 +86,10 @@ pub async fn analyze_draft_for_distribution(
                 Err(e) => {
                     for _ in 0..chunks.len() {
                         recommendations.push(LlmRecommendation {
-                            action: "skip".to_string(),
-                            target_note_id: None,
-                            new_note_title: None,
-                            parent_note_id: None,
-                            parent_chunk_index: None,
-                            merge_target_chunk_index: None,
-                            reason: format!("Failed to parse batch JSON: {}. Raw: {}", e, res.text),
+                            action: DistributeAction::Skip { reason: format!("Failed to parse batch JSON: {}. Raw: {}", e, res.text) },
+                            tags: None,
+                            confidence: None,
+                            reason: "Failed to parse batch JSON".to_string(),
                         });
                     }
                 }
@@ -102,12 +99,9 @@ pub async fn analyze_draft_for_distribution(
 
     while recommendations.len() < chunks.len() {
         recommendations.push(LlmRecommendation {
-            action: "skip".to_string(),
-            target_note_id: None,
-            new_note_title: None,
-            parent_note_id: None,
-            parent_chunk_index: None,
-            merge_target_chunk_index: None,
+            action: DistributeAction::Skip { reason: "LLM returned incomplete recommendations".to_string() },
+            tags: None,
+            confidence: None,
             reason: "LLM returned incomplete recommendations".to_string(),
         });
     }

@@ -13,10 +13,11 @@ pub mod schedule;
 pub mod search;
 pub mod section;
 pub mod distribute;
+pub mod tag;
 
 pub use card::{Card, CardId, CardType, NewCard};
 pub use fragment::{Fragment, FragmentId, NewFragment};
-pub use note::{IndexingStatus, NewNote, Note, NoteId, NoteRevision};
+pub use note::{IndexingStatus, NewNote, Note, NoteId, NoteRevision, NoteLifecycle};
 pub use schedule::{
     NewSchedule, Rating, ReviewLog, ReviewTarget, ReviewTargetType, Schedule, ScheduleId,
     SchedulerState, NoteDueCount, RepeatModeNode,
@@ -24,9 +25,10 @@ pub use schedule::{
 pub use search::{ScoredHit, SearchHit};
 pub use section::{Section, SectionId, NewSection};
 pub use distribute::{
-    TopicChunk, RawBlock, CandidateNote, LlmRecommendation,
-    ChunkDistributionPlan, DraftDistributionPlan, extract_json_payload,
+    TopicChunk, RawBlock, CandidateNote, LlmRecommendation, DistributeAction,
+    ChunkDistributionPlan, DraftDistributionPlan,
 };
+pub use tag::{Tag, TagId, NewTag, TagSource, NoteTagRelation, FragmentTagRelation};
 
 /// Unix timestamp in seconds. Single shared alias to avoid `i64` everywhere.
 pub type Timestamp = i64;

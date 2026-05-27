@@ -17,6 +17,7 @@ pub async fn retrieval_query(
     let opts = options.unwrap_or(RetrieveOptions {
         top_k: None,
         filters: None,
+        target_level: None,
     });
     retrieve(&state, &query, query_embedding.as_deref(), &config, &opts).await
 }

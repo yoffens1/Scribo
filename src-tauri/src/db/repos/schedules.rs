@@ -142,14 +142,14 @@ pub fn get_hierarchical_due_counts(
         "WITH RECURSIVE note_tree(parent, descendant) AS (
             SELECT note_id, note_id
             FROM notes
-            WHERE is_deleted = 0
+            WHERE lifecycle != 'deleted'
             
             UNION ALL
             
             SELECT t.parent, n.note_id
             FROM note_tree t
             JOIN notes n ON n.parent_note_id = t.descendant
-            WHERE n.is_deleted = 0
+            WHERE n.lifecycle != 'deleted'
         ),
         direct_due AS (
             SELECT target_id AS note_id, COUNT(*) AS cnt
@@ -157,12 +157,11 @@ pub fn get_hierarchical_due_counts(
             WHERE target_type = 'note' AND next_review <= ?
             GROUP BY target_id
             UNION ALL
-            SELECT sec.note_id, COUNT(*) AS cnt
+            SELECT c.note_id, COUNT(*) AS cnt
             FROM schedules s
             JOIN cards c ON s.target_id = c.card_id
-            JOIN sections sec ON c.section_id = sec.section_id
-            WHERE s.target_type = 'card' AND s.next_review <= ? AND c.is_suspended = 0
-            GROUP BY sec.note_id
+            WHERE s.target_type = 'card' AND s.next_review <= ? AND c.status != 'suspended'
+            GROUP BY c.note_id
         ),
         note_direct_due AS (
             SELECT note_id, SUM(cnt) AS direct_due_cnt
@@ -197,26 +196,25 @@ pub fn get_repeat_mode_tree(
         "WITH RECURSIVE note_tree AS (
             SELECT n.note_id, n.title, n.parent_note_id, n.path_cached, 0 as depth
             FROM notes n
-            WHERE n.parent_note_id IS NULL AND n.is_deleted = 0 AND n.is_draft = 0
+            WHERE n.parent_note_id IS NULL AND n.lifecycle = 'active'
             
             UNION ALL
             
             SELECT n.note_id, n.title, n.parent_note_id, n.path_cached, nt.depth + 1
             FROM notes n
             JOIN note_tree nt ON n.parent_note_id = nt.note_id
-            WHERE n.is_deleted = 0 AND n.is_draft = 0
+            WHERE n.lifecycle = 'active'
         ),
         card_counts AS (
             SELECT 
-                s.note_id,
+                c.note_id,
                 COUNT(*) FILTER (WHERE sch.next_review <= ?) as due_count,
                 COUNT(*) FILTER (WHERE sch.state = 'new') as new_count,
                 COUNT(*) as total_count
             FROM cards c
-            JOIN sections s USING (section_id)
             LEFT JOIN schedules sch ON sch.target_type = 'card' AND sch.target_id = c.card_id
-            WHERE c.is_suspended = 0
-            GROUP BY s.note_id
+            WHERE c.status != 'suspended'
+            GROUP BY c.note_id
         )
         SELECT 
             nt.note_id,

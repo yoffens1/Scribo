@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::ai::LlmService;
+use crate::ai::{LlmService, extract_json_payload};
 use crate::DbState;
 use std::sync::Arc;
 
@@ -13,9 +13,11 @@ pub async fn refresh_stale_cards_for_notes(
         for &note_id in note_ids {
             let cards = crate::db::repos::cards::list_by_note(conn, note_id)?;
             for card in cards {
-                if card.is_stale {
-                    if let Some(section) = crate::db::repos::sections::find_by_id(conn, card.section_id)? {
-                        stale.push((card, section));
+                if card.status == crate::domain::card::CardLifecycle::Stale {
+                    if let Some(sid) = card.section_id {
+                        if let Some(section) = crate::db::repos::sections::find_by_id(conn, sid)? {
+                            stale.push((card, section));
+                        }
                     }
                 }
             }
@@ -42,7 +44,7 @@ pub async fn refresh_stale_cards_for_notes(
             }
 
             let mut custom_front = None;
-            if let Some(json_str) = crate::domain::distribute::extract_json_payload(&response.text) {
+            if let Some(json_str) = extract_json_payload(&response.text) {
                 if let Ok(parsed) = serde_json::from_str::<AtomizeResponse>(&json_str) {
                     let clean_front = parsed.question_heading.trim_start_matches("##").trim().to_string();
                     custom_front = Some(clean_front);
@@ -59,8 +61,8 @@ pub async fn refresh_stale_cards_for_notes(
                     card.id.0,
                     Some(&front),
                     Some(&section.text_raw),
-                    card.is_suspended,
-                    false,
+                    crate::domain::card::CardLifecycle::Fresh,
+                    None,
                 )?;
                 conn.execute(
                     "UPDATE cards SET card_type = 'qa' WHERE card_id = ?",

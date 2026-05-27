@@ -1,12 +1,12 @@
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::AppError;
-use crate::domain::note::{Note, NoteId, IndexingStatus};
+use crate::domain::note::{Note, NoteId, IndexingStatus, NoteLifecycle};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NoteListItem {
     pub note_id: NoteId,
     pub title: String,
-    pub is_deleted: bool,
+    pub lifecycle: String,
     pub embedding_model: Option<String>,
     pub indexing_version: Option<String>,
 }
@@ -14,6 +14,7 @@ pub struct NoteListItem {
 fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
     let parent_note_id: Option<i64> = row.get(4)?;
     let status_str: String = row.get(8)?;
+    let lifecycle_str: String = row.get(14)?;
     Ok(Note {
         id: NoteId(row.get(0)?),
         title: row.get(1)?,
@@ -29,15 +30,13 @@ fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
         embedding_model: row.get(11)?,
         embedding_dimension: row.get(12)?,
         indexing_version: row.get(13)?,
-        is_draft: row.get::<_, i64>(14).unwrap_or(0) != 0,
-        is_archived: row.get::<_, i64>(15).unwrap_or(0) != 0,
-        is_deleted: row.get::<_, i64>(16).unwrap_or(0) != 0,
-        is_pinned: row.get::<_, i64>(17).unwrap_or(0) != 0,
-        is_favorite: row.get::<_, i64>(18).unwrap_or(0) != 0,
-        mastery: row.get(19)?,
-        last_studied: row.get(20)?,
-        created_at: row.get(21)?,
-        updated_at: row.get(22)?,
+        lifecycle: NoteLifecycle::parse(&lifecycle_str).unwrap_or(NoteLifecycle::Active),
+        is_pinned: row.get::<_, i64>(15)? != 0,
+        is_favorite: row.get::<_, i64>(16)? != 0,
+        mastery: row.get(17)?,
+        last_studied: row.get(18)?,
+        created_at: row.get(19)?,
+        updated_at: row.get(20)?,
     })
 }
 
@@ -45,7 +44,7 @@ const SELECT_NOTE_COLUMNS: &str =
     "SELECT note_id, title, content, content_hash, 
             parent_note_id, path_cached, sort_order, icon,
             indexing_status, indexing_error, indexed_at, embedding_model, embedding_dimension, 
-            indexing_version, is_draft, is_archived, is_deleted, is_pinned, is_favorite,
+            indexing_version, lifecycle, is_pinned, is_favorite,
             mastery, last_studied, created_at, updated_at
      FROM notes";
 
@@ -71,7 +70,7 @@ fn get_path_for_note(conn: &Connection, parent_id: Option<NoteId>, title: &str) 
 }
 
 fn recalculate_descendant_paths(conn: &Connection, parent_id: NoteId, parent_path: &str) -> Result<(), AppError> {
-    let mut stmt = conn.prepare("SELECT note_id, title FROM notes WHERE parent_note_id = ? AND is_deleted = 0")?;
+    let mut stmt = conn.prepare("SELECT note_id, title FROM notes WHERE parent_note_id = ? AND lifecycle != 'deleted'")?;
     let mut rows = stmt.query([parent_id.0])?;
     let mut children = Vec::new();
     while let Some(row) = rows.next()? {
@@ -101,15 +100,15 @@ pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<
 
     let parent_id = note.parent_note_id.map(|id| id.0);
     let sort_order = note.sort_order.unwrap_or(0);
-    let is_draft_int = if note.is_draft { 1 } else { 0 };
+    let lifecycle_str = note.lifecycle.unwrap_or(NoteLifecycle::Active).to_string();
     let is_pinned_int = if note.is_pinned { 1 } else { 0 };
     let is_favorite_int = if note.is_favorite { 1 } else { 0 };
 
     let note_id: i64 = conn.query_row(
         "INSERT INTO notes (
             title, content, content_hash, parent_note_id, path_cached, sort_order, icon,
-            indexing_status, is_draft, is_archived, is_deleted, is_pinned, is_favorite, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, ?, ?, ?, ?)
+            indexing_status, lifecycle, is_pinned, is_favorite, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
          RETURNING note_id",
         rusqlite::params![
             note.title,
@@ -119,7 +118,7 @@ pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<
             path_cached,
             sort_order,
             note.icon,
-            is_draft_int,
+            lifecycle_str,
             is_pinned_int,
             is_favorite_int,
             now,
@@ -148,7 +147,7 @@ pub fn record_failure(conn: &Connection, note_id: i64, error: &str) -> Result<()
 
 pub fn soft_delete(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE notes SET is_deleted = 1, updated_at = ? WHERE note_id = ?",
+        "UPDATE notes SET lifecycle = 'deleted', updated_at = ? WHERE note_id = ?",
         rusqlite::params![updated_at, note_id],
     )?;
     Ok(())
@@ -156,7 +155,7 @@ pub fn soft_delete(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(
 
 pub fn restore(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE notes SET is_deleted = 0, updated_at = ? WHERE note_id = ?",
+        "UPDATE notes SET lifecycle = 'active', updated_at = ? WHERE note_id = ?",
         rusqlite::params![updated_at, note_id],
     )?;
     Ok(())
@@ -231,7 +230,7 @@ pub fn move_note(conn: &Connection, note_id: i64, new_parent_id: Option<NoteId>,
 
 pub fn count_fragments(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM fragments WHERE note_id = ?",
+        "SELECT COUNT(*) FROM chunks WHERE note_id = ? AND level = 1",
         rusqlite::params![note_id],
         |row| row.get(0),
     )?;
@@ -248,13 +247,13 @@ pub fn hard_delete(conn: &Connection, note_id: i64) -> Result<(), AppError> {
 
 pub fn get_all(conn: &Connection) -> Result<Vec<NoteListItem>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT note_id, title, is_deleted, embedding_model, indexing_version FROM notes",
+        "SELECT note_id, title, lifecycle, embedding_model, indexing_version FROM notes",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(NoteListItem {
             note_id: NoteId(row.get(0)?),
             title: row.get(1)?,
-            is_deleted: row.get::<_, i64>(2)? != 0,
+            lifecycle: row.get(2)?,
             embedding_model: row.get(3)?,
             indexing_version: row.get(4)?,
         })
@@ -328,9 +327,8 @@ pub fn set_content(conn: &Connection, note_id: i64, content: &str) -> Result<(),
 pub fn archive_note(conn: &Connection, note_id: i64) -> Result<(), AppError> {
     let now = crate::db::time::now_seconds();
     conn.execute(
-        "UPDATE notes SET is_draft = 0, is_archived = 1, updated_at = ? WHERE note_id = ?",
+        "UPDATE notes SET lifecycle = 'archived', updated_at = ? WHERE note_id = ?",
         rusqlite::params![now, note_id],
     )?;
     Ok(())
 }
-

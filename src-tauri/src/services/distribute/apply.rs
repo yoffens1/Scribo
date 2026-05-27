@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::AppError;
-use crate::domain::distribute::DraftDistributionPlan;
-use crate::domain::note::{NoteId, NewNote, IndexingStatus};
+use crate::domain::distribute::{DraftDistributionPlan, DistributeAction};
+use crate::domain::note::{NoteId, NewNote, IndexingStatus, NoteLifecycle};
 
 pub fn apply_distribution(
     conn: &mut Connection,
@@ -18,22 +18,21 @@ pub fn apply_distribution(
         iterations += 1;
         
         for i in 0..chunks.len() {
-            if chunks[i].recommendation.action == "merge_with_chunk" {
-                if let Some(target_idx) = chunks[i].recommendation.merge_target_chunk_index {
-                    if target_idx < chunks.len() && target_idx != i {
-                        let text_to_append = chunks[i].text.clone();
-                        if !text_to_append.is_empty() {
-                            if chunks[target_idx].text.is_empty() {
-                                chunks[target_idx].text = text_to_append;
-                            } else {
-                                chunks[target_idx].text.push_str("\n\n");
-                                chunks[target_idx].text.push_str(&text_to_append);
-                            }
+            if let DistributeAction::MergeWithChunk { chunk_index } = chunks[i].recommendation.action {
+                let target_idx = chunk_index;
+                if target_idx < chunks.len() && target_idx != i {
+                    let text_to_append = chunks[i].text.clone();
+                    if !text_to_append.is_empty() {
+                        if chunks[target_idx].text.is_empty() {
+                            chunks[target_idx].text = text_to_append;
+                        } else {
+                            chunks[target_idx].text.push_str("\n\n");
+                            chunks[target_idx].text.push_str(&text_to_append);
                         }
-                        chunks[i].recommendation.action = "skip".to_string();
-                        chunks[i].text.clear();
-                        resolved_any = true;
                     }
+                    chunks[i].recommendation.action = DistributeAction::Skip { reason: "Merged into another chunk".to_string() };
+                    chunks[i].text.clear();
+                    resolved_any = true;
                 }
             }
         }
@@ -43,25 +42,35 @@ pub fn apply_distribution(
 
     // 1. First apply all 'append' actions
     for chunk in &chunks {
-        if chunk.recommendation.action == "append" {
-            if let Some(target_id) = chunk.recommendation.target_note_id {
-                let target_note = crate::db::repos::notes::get_by_id(conn, target_id)?
-                    .ok_or_else(|| AppError::Other(format!("Target note not found: {}", target_id)))?;
-                
-                let separator = format!(
-                    "\n\n<!-- imported from draft #{} on {} -->\n",
-                    plan.draft_id,
-                    chrono::Utc::now().to_rfc3339()
-                );
-                let new_content = if target_note.content.is_empty() {
-                    chunk.text.clone()
-                } else {
-                    format!("{}{}{}", target_note.content, separator, chunk.text)
-                };
-                
-                crate::db::repos::notes::update_content_with_diff(conn, target_id, &new_content)?;
-                crate::db::repos::notes::set_status(conn, target_id, IndexingStatus::Pending)?;
-                affected_note_ids.push(target_id);
+        if let DistributeAction::Append { target_note_id, .. } = &chunk.recommendation.action {
+            let target_id = target_note_id.0;
+            let target_note = crate::db::repos::notes::get_by_id(conn, target_id)?
+                .ok_or_else(|| AppError::Other(format!("Target note not found: {}", target_id)))?;
+            
+            let separator = format!(
+                "\n\n<!-- imported from draft #{} on {} -->\n",
+                plan.draft_id,
+                chrono::Utc::now().to_rfc3339()
+            );
+            let new_content = if target_note.content.is_empty() {
+                chunk.text.clone()
+            } else {
+                format!("{}{}{}", target_note.content, separator, chunk.text)
+            };
+            
+            crate::db::repos::notes::update_content_with_diff(conn, target_id, &new_content)?;
+            crate::db::repos::notes::set_status(conn, target_id, IndexingStatus::Pending)?;
+            affected_note_ids.push(target_id);
+
+            if let Some(tags) = &chunk.recommendation.tags {
+                for tag_str in tags {
+                    if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
+                        for tag_id in tag_ids {
+                            let _ = crate::db::repos::tags::associate_note_tag(conn, NoteId(target_id), tag_id, crate::domain::tag::TagSource::Ai, None);
+                            let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, NoteId(target_id), tag_id);
+                        }
+                    }
+                }
             }
         }
     }
@@ -69,7 +78,7 @@ pub fn apply_distribution(
     // 2. Insert new child notes resolving temporary negative parent IDs
     let mut inserted_notes = std::collections::HashMap::new();
     let mut pending_creations: Vec<crate::domain::distribute::ChunkDistributionPlan> = chunks.iter()
-        .filter(|c| c.recommendation.action == "create_child")
+        .filter(|c| matches!(c.recommendation.action, DistributeAction::CreateChild { .. }))
         .cloned()
         .collect();
 
@@ -79,12 +88,14 @@ pub fn apply_distribution(
         let mut next_pending = Vec::new();
 
         for chunk in pending_creations {
-            let parent_id_opt = chunk.recommendation.parent_note_id;
-            let parent_chunk_opt = chunk.recommendation.parent_chunk_index;
+            let (parent_id_opt, new_note_title) = match &chunk.recommendation.action {
+                DistributeAction::CreateChild { parent_note_id, new_note_title } => {
+                    (parent_note_id.map(|id| id.0), new_note_title.clone())
+                }
+                _ => continue,
+            };
             
-            let can_insert = if let Some(parent_chunk_idx) = parent_chunk_opt {
-                inserted_notes.contains_key(&parent_chunk_idx)
-            } else if let Some(pid) = parent_id_opt {
+            let can_insert = if let Some(pid) = parent_id_opt {
                 if pid < 0 {
                     let parent_chunk_idx = (-pid - 1) as usize;
                     inserted_notes.contains_key(&parent_chunk_idx)
@@ -96,33 +107,43 @@ pub fn apply_distribution(
             };
 
             if can_insert {
-                let title = chunk.recommendation.new_note_title.clone()
-                    .unwrap_or_else(|| chunk.suggested_title.clone());
-
-                let parent_id = if let Some(parent_chunk_idx) = parent_chunk_opt {
-                    inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
+                let title = if new_note_title.is_empty() {
+                    chunk.suggested_title.clone()
                 } else {
-                    match parent_id_opt {
-                        Some(pid) if pid < 0 => {
-                            let parent_chunk_idx = (-pid - 1) as usize;
-                            inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
-                        }
-                        Some(pid) => Some(NoteId(pid)),
-                        None => None,
+                    new_note_title
+                };
+
+                let parent_id = match parent_id_opt {
+                    Some(pid) if pid < 0 => {
+                        let parent_chunk_idx = (-pid - 1) as usize;
+                        inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
                     }
+                    Some(pid) => Some(NoteId(pid)),
+                    None => None,
                 };
 
                 let new_note = NewNote {
                     title,
                     content: chunk.text.clone(),
                     parent_note_id: parent_id,
-                    is_draft: false,
+                    lifecycle: Some(NoteLifecycle::Active),
                     ..Default::default()
                 };
                 let new_id = crate::db::repos::notes::insert(conn, &new_note)?;
                 inserted_notes.insert(chunk.chunk_index, new_id.0);
                 affected_note_ids.push(new_id.0);
                 progressed = true;
+
+                if let Some(tags) = &chunk.recommendation.tags {
+                    for tag_str in tags {
+                        if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
+                            for tag_id in tag_ids {
+                                let _ = crate::db::repos::tags::associate_note_tag(conn, new_id, tag_id, crate::domain::tag::TagSource::Ai, None);
+                                let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
+                            }
+                        }
+                    }
+                }
             } else {
                 next_pending.push(chunk);
             }
@@ -133,22 +154,40 @@ pub fn apply_distribution(
 
     // Safe fallback if circular dependency occurs
     for chunk in pending_creations {
-        let title = chunk.recommendation.new_note_title.clone()
-            .unwrap_or_else(|| chunk.suggested_title.clone());
+        let new_note_title = match &chunk.recommendation.action {
+            DistributeAction::CreateChild { new_note_title, .. } => new_note_title.clone(),
+            _ => continue,
+        };
+        let title = if new_note_title.is_empty() {
+            chunk.suggested_title.clone()
+        } else {
+            new_note_title
+        };
 
         let new_note = NewNote {
             title,
             content: chunk.text.clone(),
             parent_note_id: None,
-            is_draft: false,
+            lifecycle: Some(NoteLifecycle::Active),
             ..Default::default()
         };
         let new_id = crate::db::repos::notes::insert(conn, &new_note)?;
         affected_note_ids.push(new_id.0);
+
+        if let Some(tags) = &chunk.recommendation.tags {
+            for tag_str in tags {
+                if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
+                    for tag_id in tag_ids {
+                        let _ = crate::db::repos::tags::associate_note_tag(conn, new_id, tag_id, crate::domain::tag::TagSource::Ai, None);
+                        let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
+                    }
+                }
+            }
+        }
     }
 
     // Only archive the draft note if none of the chunks were skipped.
-    let has_skipped = plan.chunks.iter().any(|c| c.recommendation.action == "skip");
+    let has_skipped = plan.chunks.iter().any(|c| matches!(c.recommendation.action, DistributeAction::Skip { .. }));
     if !has_skipped {
         crate::db::repos::notes::archive_note(conn, plan.draft_id)?;
     }
@@ -187,7 +226,7 @@ mod tests {
         let draft = NewNote {
             title: "Quick draft".to_string(),
             content: "Draft content to distribute".to_string(),
-            is_draft: true,
+            lifecycle: Some(NoteLifecycle::Draft),
             ..Default::default()
         };
         let draft_id = crate::db::repos::notes::insert(&conn, &draft).unwrap();
@@ -196,7 +235,7 @@ mod tests {
         let target = NewNote {
             title: "Math".to_string(),
             content: "Initial math content".to_string(),
-            is_draft: false,
+            lifecycle: Some(NoteLifecycle::Active),
             ..Default::default()
         };
         let target_id = crate::db::repos::notes::insert(&conn, &target).unwrap();
@@ -211,12 +250,12 @@ mod tests {
                     suggested_title: "Chunk 1".to_string(),
                     candidates: vec![],
                     recommendation: LlmRecommendation {
-                        action: "append".to_string(),
-                        target_note_id: Some(target_id.0),
-                        new_note_title: None,
-                        parent_note_id: None,
-                        parent_chunk_index: None,
-                        merge_target_chunk_index: None,
+                        action: DistributeAction::Append {
+                            target_note_id: target_id,
+                            target_section_id: None,
+                        },
+                        tags: Some(vec!["#Math".to_string()]),
+                        confidence: Some(0.9),
                         reason: "fits math".to_string(),
                     },
                 },
@@ -226,12 +265,12 @@ mod tests {
                     suggested_title: "Subtopic".to_string(),
                     candidates: vec![],
                     recommendation: LlmRecommendation {
-                        action: "create_child".to_string(),
-                        target_note_id: None,
-                        new_note_title: Some("Calculus".to_string()),
-                        parent_note_id: Some(target_id.0),
-                        parent_chunk_index: None,
-                        merge_target_chunk_index: None,
+                        action: DistributeAction::CreateChild {
+                            parent_note_id: Some(target_id),
+                            new_note_title: "Calculus".to_string(),
+                        },
+                        tags: Some(vec!["#Math/Calculus".to_string()]),
+                        confidence: Some(0.95),
                         reason: "new topic under math".to_string(),
                     },
                 },
@@ -243,25 +282,35 @@ mod tests {
 
         // 5. Verify results
         let draft_note = crate::db::repos::notes::get_by_id(&conn, draft_id.0).unwrap().unwrap();
-        assert_eq!(draft_note.is_draft, false);
-        assert_eq!(draft_note.is_archived, true);
+        assert_eq!(draft_note.lifecycle, NoteLifecycle::Archived);
 
         let target_note = crate::db::repos::notes::get_by_id(&conn, target_id.0).unwrap().unwrap();
         assert!(target_note.content.starts_with("Initial math content\n\n<!-- imported from draft #"));
         assert!(target_note.content.ends_with("Chunk 1 to append"));
         assert_eq!(target_note.indexing_status, crate::domain::note::IndexingStatus::Pending);
 
-        let mut stmt = conn.prepare("SELECT note_id, title, content, parent_note_id, is_draft FROM notes WHERE parent_note_id = ?").unwrap();
+        let mut stmt = conn.prepare("SELECT note_id, title, content, parent_note_id, lifecycle FROM notes WHERE parent_note_id = ?").unwrap();
         let mut rows = stmt.query([target_id.0]).unwrap();
         let row = rows.next().unwrap().unwrap();
         let child_title: String = row.get(1).unwrap();
         let child_content: String = row.get(2).unwrap();
         let child_parent_id: i64 = row.get(3).unwrap();
-        let child_is_draft: i64 = row.get(4).unwrap();
+        let child_lifecycle_str: String = row.get(4).unwrap();
 
         assert_eq!(child_title, "Calculus");
         assert_eq!(child_content, "Chunk 2 to create child");
         assert_eq!(child_parent_id, target_id.0);
-        assert_eq!(child_is_draft, 0);
+        assert_eq!(child_lifecycle_str, "active");
+
+        // Verify tags
+        let target_tags = crate::db::repos::tags::get_note_tags(&conn, target_id).unwrap();
+        assert_eq!(target_tags.len(), 1);
+        assert_eq!(target_tags[0].name, "Math");
+
+        let child_note_id = row.get::<_, i64>(0).unwrap();
+        let child_tags = crate::db::repos::tags::get_note_tags(&conn, NoteId(child_note_id)).unwrap();
+        assert_eq!(child_tags.len(), 1);
+        assert_eq!(child_tags[0].name, "Calculus");
+        assert_eq!(child_tags[0].path_cached, "math/calculus");
     }
 }

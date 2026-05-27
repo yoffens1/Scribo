@@ -1,4 +1,4 @@
-use crate::domain::distribute::ChunkDistributionPlan;
+use crate::domain::distribute::{ChunkDistributionPlan, DistributeAction};
 
 pub trait Classifier: Send + Sync {
     fn classify(&self, chunks: &mut [ChunkDistributionPlan]);
@@ -21,9 +21,12 @@ impl Classifier for HeuristicClassifier {
 pub fn apply_heuristic_linking(chunks: &mut [ChunkDistributionPlan]) {
     let mut new_notes: Vec<(usize, String)> = Vec::new();
     for chunk in chunks.iter() {
-        if chunk.recommendation.action == "create_child" {
-            let title = chunk.recommendation.new_note_title.clone()
-                .unwrap_or_else(|| chunk.suggested_title.clone());
+        if let DistributeAction::CreateChild { new_note_title, .. } = &chunk.recommendation.action {
+            let title = if new_note_title.is_empty() {
+                chunk.suggested_title.clone()
+            } else {
+                new_note_title.clone()
+            };
             new_notes.push((chunk.chunk_index, title));
         }
     }
@@ -48,7 +51,12 @@ pub fn apply_heuristic_linking(chunks: &mut [ChunkDistributionPlan]) {
             };
 
             if is_match && title_a.len() > title_b.len() {
-                chunks[*idx_a].recommendation.parent_note_id = Some(-(*idx_b as i64 + 1));
+                if let DistributeAction::CreateChild { new_note_title, .. } = &chunks[*idx_a].recommendation.action {
+                    chunks[*idx_a].recommendation.action = DistributeAction::CreateChild {
+                        parent_note_id: Some(crate::domain::NoteId(-(*idx_b as i64 + 1))),
+                        new_note_title: new_note_title.clone(),
+                    };
+                }
                 break;
             }
         }

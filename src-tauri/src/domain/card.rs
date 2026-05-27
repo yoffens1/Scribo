@@ -8,7 +8,7 @@
 //! same scheduling engine usable for both cards and whole-note reviews.
 
 use serde::{Deserialize, Serialize};
-use super::{SectionId, Timestamp};
+use super::{SectionId, NoteId, Timestamp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -61,18 +61,75 @@ impl CardType {
     }
 }
 
+impl std::fmt::Display for CardType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for CardType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("Unknown CardType: {}", s))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardLifecycle {
+    Fresh,
+    Stale,
+    Orphaned,
+    Suspended,
+}
+
+impl CardLifecycle {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Orphaned => "orphaned",
+            Self::Suspended => "suspended",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "fresh" => Some(Self::Fresh),
+            "stale" => Some(Self::Stale),
+            "orphaned" => Some(Self::Orphaned),
+            "suspended" => Some(Self::Suspended),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for CardLifecycle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for CardLifecycle {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("Unknown CardLifecycle: {}", s))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     pub id: CardId,
-    pub section_id: SectionId,
+    pub note_id: NoteId,
+    pub section_id: Option<SectionId>,
     pub card_type: CardType,
     pub custom_front: Option<String>,
     pub custom_back: Option<String>,
     pub cloze_mask: Option<String>,
-    pub is_stale: bool,
-    pub is_suspended: bool,
+    pub status: CardLifecycle,
+    pub last_section_snapshot: Option<String>,
     pub generated_by: Option<String>,
-    pub section_hash_at_creation: Option<String>,
+    pub source_raw_hash_at_creation: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -85,7 +142,7 @@ pub struct RenderedCard {
     pub back: String,
     pub card_type: CardType,
     // Context for UI
-    pub note_id: crate::domain::NoteId,
+    pub note_id: NoteId,
     pub note_title: String,
     pub note_path: String,
 }
@@ -93,15 +150,24 @@ pub struct RenderedCard {
 impl Card {
     pub fn render(
         &self,
-        section: &crate::domain::section::Section,
-        note_id: crate::domain::NoteId,
+        section_opt: Option<&crate::domain::section::Section>,
+        note_id: NoteId,
         note_title: String,
         note_path: String,
     ) -> RenderedCard {
+        let section_text = match section_opt {
+            Some(s) => &s.text_raw,
+            None => self.last_section_snapshot.as_deref().unwrap_or(""),
+        };
+        let section_heading = match section_opt {
+            Some(s) => s.heading.as_deref().unwrap_or("Untitled Section"),
+            None => "Orphaned Section",
+        };
+
         match self.card_type {
             CardType::Heading => {
-                let default_front = section.heading.as_deref().unwrap_or("Untitled Section").to_string();
-                let default_back = section.text_raw.to_string();
+                let default_front = section_heading.to_string();
+                let default_back = section_text.to_string();
                 RenderedCard {
                     card_id: self.id,
                     front: self.custom_front.clone().unwrap_or(default_front),
@@ -122,11 +188,11 @@ impl Card {
                 note_path,
             },
             CardType::Cloze => {
-                let masked = apply_cloze_mask(&section.text_raw, self.cloze_mask.as_deref());
+                let masked = apply_cloze_mask(section_text, self.cloze_mask.as_deref());
                 RenderedCard {
                     card_id: self.id,
                     front: masked,
-                    back: section.text_raw.to_string(),
+                    back: section_text.to_string(),
                     card_type: self.card_type,
                     note_id,
                     note_title,
@@ -146,11 +212,12 @@ fn apply_cloze_mask(text: &str, mask_json: Option<&str>) -> String {
 
 #[derive(Debug, Clone)]
 pub struct NewCard {
+    pub note_id: NoteId,
     pub section_id: SectionId,
     pub card_type: CardType,
     pub custom_front: Option<String>,
     pub custom_back: Option<String>,
     pub cloze_mask: Option<String>,
     pub generated_by: Option<String>,
-    pub section_hash_at_creation: Option<String>,
+    pub source_raw_hash_at_creation: Option<String>,
 }

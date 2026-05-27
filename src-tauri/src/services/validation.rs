@@ -10,7 +10,7 @@ pub fn check_needs_indexing(
     let query = "
         SELECT embedding_model, indexing_version, indexing_status
         FROM notes
-        WHERE note_id = ?1 AND is_deleted = 0
+        WHERE note_id = ?1 AND lifecycle != 'deleted'
     ";
 
     let row = conn.query_row(query, [note_id], |row| {

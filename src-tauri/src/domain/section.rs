@@ -25,7 +25,8 @@ pub struct Section {
     pub text_raw: String,
     pub heading: Option<String>,
     pub heading_level: Option<i64>,
-    pub source_hash: String,
+    pub raw_hash: String,
+    pub clean_hash: String,
     pub content_offset_start: i64,
     pub content_offset_end: i64,
 }
@@ -37,7 +38,8 @@ pub struct NewSection {
     pub text_raw: String,
     pub heading: Option<String>,
     pub heading_level: Option<i64>,
-    pub source_hash: String,
+    pub raw_hash: String,
+    pub clean_hash: String,
     pub content_offset_start: i64,
     pub content_offset_end: i64,
 }
