@@ -78,8 +78,9 @@ impl Chunker for SemanticChunker {
                     .unwrap_or_else(|| {
                         let first_line = current_chunk_blocks[0].text.lines().next().unwrap_or("Untitled").trim();
                         let clean = first_line.replace("#", "").trim().to_string();
-                        if clean.len() > 40 {
-                            format!("{}...", &clean[..40])
+                        if clean.chars().count() > 40 {
+                            let truncated: String = clean.chars().take(40).collect();
+                            format!("{}...", truncated)
                         } else {
                             clean
                         }
@@ -99,8 +100,9 @@ impl Chunker for SemanticChunker {
                 .unwrap_or_else(|| {
                     let first_line = current_chunk_blocks[0].text.lines().next().unwrap_or("Untitled").trim();
                     let clean = first_line.replace("#", "").trim().to_string();
-                    if clean.len() > 40 {
-                        format!("{}...", &clean[..40])
+                    if clean.chars().count() > 40 {
+                        let truncated: String = clean.chars().take(40).collect();
+                        format!("{}...", truncated)
                     } else {
                         clean
                     }
