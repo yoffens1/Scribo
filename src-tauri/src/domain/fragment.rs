@@ -33,7 +33,8 @@ pub struct Fragment {
     pub note_id: NoteId,
     /// Sequential index of this fragment within its note (0-based).
     pub fragment_index: i64,
-    pub text: String,
+    pub text_clean: String,
+    pub source_hash: String,
     pub token_count: Option<i64>,
     /// Raw little-endian f32 vector. Decoded by the search service when needed.
     pub embedding: Option<Vec<u8>>,
@@ -42,18 +43,18 @@ pub struct Fragment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentInsertRow {
     pub fragment_index: i64,
-    pub text: Option<String>,
+    pub text_clean: String,
+    pub source_hash: String,
     pub tokens: Option<i64>,
     pub embedding: Vec<u8>,
 }
-
-
 
 #[derive(Debug, Clone)]
 pub struct NewFragment {
     pub note_id: NoteId,
     pub fragment_index: i64,
-    pub text: String,
+    pub text_clean: String,
+    pub source_hash: String,
     pub token_count: Option<i64>,
     pub embedding: Option<Vec<u8>>,
 }

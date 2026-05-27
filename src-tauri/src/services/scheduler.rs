@@ -1,20 +1,13 @@
-use std::path::PathBuf;
 use tokio::sync::mpsc;
 use parking_lot::RwLock;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub enum IndexCommand {
-    IndexFile {
-        file_path: String,
-        content: String,
+    IndexNote {
+        note_id: i64,
         indexing_version: String,
         // Model used for embeddings
-        model: String,
-    },
-    IndexDirectory {
-        dir_path: PathBuf,
-        indexing_version: String,
         model: String,
     },
     Shutdown,
@@ -36,55 +29,36 @@ impl ReindexScheduler {
         tauri::async_runtime::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    IndexCommand::IndexFile { file_path, content, indexing_version, model } => {
-                        println!("Processing indexing for: {}", file_path);
+                    IndexCommand::IndexNote { note_id, indexing_version, model } => {
+                        println!("Processing indexing for note: {}", note_id);
                         
                         let pool_guard = pool_clone.read();
                         if let Some(ref p) = *pool_guard {
                             if let Ok(mut conn) = p.get() {
-                                let hash = crate::db::hash::compute_file_hash(&content);
-                                
-                                let validation = crate::services::validation::check_needs_indexing(
+                                let needs_indexing = crate::services::validation::check_needs_indexing(
                                     &conn,
-                                    &file_path,
-                                    &hash,
+                                    note_id,
                                     &model,
                                     &indexing_version,
-                                    None
                                 );
 
-                                if let Ok(val) = validation {
-                                    if val.should_index {
-                                        // TODO: generate actual embeddings
-                                        let file_name = std::path::Path::new(&file_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or("unknown");
-                                            
-                                        let payload = crate::services::indexer::IndexingPayload {
-                                            file_path: &file_path,
-                                            file_name,
-                                            file_hash: &hash,
-                                            file_mtime: None,
-                                            embedding_model: &model,
-                                            embedding_dim: 1536,
-                                            indexing_version: &indexing_version,
-                                            fragments: vec![], // TODO: generate via fragmenter and LLM
-                                        };
-                                        
-                                        if let Err(e) = crate::services::indexer::persist_indexed_file(&mut conn, payload) {
-                                            eprintln!("Failed to persist indexed file {}: {}", file_path, e);
-                                        }
-                                    } else {
-                                        println!("Skipping indexing for {}: unchanged", file_path);
+                                if let Ok(true) = needs_indexing {
+                                    let dim = if model.contains("granite") { 384 } else { 1536 };
+                                    let payload = crate::services::indexer::IndexingPayload {
+                                        note_id,
+                                        embedding_model: &model,
+                                        embedding_dim: dim,
+                                        indexing_version: &indexing_version,
+                                    };
+                                    
+                                    if let Err(e) = crate::services::indexer::persist_indexed_file(&mut conn, payload) {
+                                        eprintln!("Failed to persist indexed note {}: {}", note_id, e);
                                     }
+                                } else {
+                                    println!("Skipping indexing for note {}: unchanged or up-to-date", note_id);
                                 }
                             }
                         }
-                    }
-                    IndexCommand::IndexDirectory { dir_path, indexing_version: _, model: _ } => {
-                        println!("Scanning directory for indexing: {:?}", dir_path);
-                        // TODO: Recursively queue notes
                     }
                     IndexCommand::Shutdown => break,
                 }
@@ -94,10 +68,9 @@ impl ReindexScheduler {
         Self { sender: tx_clone }
     }
 
-    pub async fn enqueue_file(&self, file_path: String, content: String, indexing_version: String, model: String) {
-        let _ = self.sender.send(IndexCommand::IndexFile {
-            file_path,
-            content,
+    pub async fn enqueue_note(&self, note_id: i64, indexing_version: String, model: String) {
+        let _ = self.sender.send(IndexCommand::IndexNote {
+            note_id,
             indexing_version,
             model,
         }).await;

@@ -1,16 +1,12 @@
 //! Note — a user-authored document. The "macro" unit of knowledge.
 //!
-//! Notes are the source of truth. They live primarily in the database
-//! (`content` column). A note MAY be exported to a Markdown file via
-//! `file_path` for compatibility with external tools (git, Obsidian, etc.),
-//! but the database is authoritative — file is just a projection.
+//! Заметка — единица знания. БД — единственный источник истины.
 
 use serde::{Deserialize, Serialize};
 
 use super::Timestamp;
 
-/// Strongly-typed note identifier. Prevents accidental id mixing
-/// (e.g. passing a CardId where NoteId is expected).
+/// Strongly-typed note identifier. Prevents accidental id mixing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct NoteId(pub i64);
@@ -31,61 +27,48 @@ impl std::fmt::Display for NoteId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IndexingStatus {
-    /// Note exists but indexing has not started.
-    Pending,
-    /// Indexing is currently running.
-    Indexing,
-    /// Successfully indexed; fragments and embeddings are up to date.
-    Indexed,
-    /// Indexing failed; see `indexing_error` on the Note.
-    Failed,
-    /// Note was modified after the last successful indexing.
-    Stale,
+    Pending,    // создана, ждёт индексации
+    Indexing,   // в процессе
+    Indexed,    // готова к поиску/повторению
+    Failed,     // упало с ошибкой
+    Stale,      // контент изменился, нужна переиндексация
 }
 
 impl IndexingStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Pending => "pending",
+            Self::Pending  => "pending",
             Self::Indexing => "indexing",
-            Self::Indexed => "indexed",
-            Self::Failed => "failed",
-            Self::Stale => "stale",
+            Self::Indexed  => "indexed",
+            Self::Failed   => "failed",
+            Self::Stale    => "stale",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "indexing" => Some(Self::Indexing),
-            "indexed" => Some(Self::Indexed),
-            "failed" => Some(Self::Failed),
-            "stale" => Some(Self::Stale),
-            _ => None,
-        }
+        Some(match s {
+            "pending"  => Self::Pending,
+            "indexing" => Self::Indexing,
+            "indexed"  => Self::Indexed,
+            "failed"   => Self::Failed,
+            "stale"    => Self::Stale,
+            _ => return None,
+        })
     }
 }
 
-/// A user-authored document.
-///
-/// `content` is the primary storage. `file_path` is optional and only
-/// set when the user wants the note mirrored on disk.
+/// Заметка — единица знания. БД — единственный источник истины.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
     pub id: NoteId,
+
+    // Контент — то что видит и редактирует юзер.
     pub title: String,
-    pub content: String,
-    /// Tags as a JSON-encoded array of strings (kept as a string for simple
-    /// SQLite storage; parsed by the repository if needed).
-    pub tags: Option<String>,
+    pub content: String,           // raw markdown
+    pub content_hash: String,      // blake3 от нормализованного content
+    pub tags: Option<String>,      // CSV или JSON-строка, выноси в Vec<String> при чтении
 
-    /// File mirroring (optional). When `None`, the note lives only in the database.
-    pub file_path: Option<String>,
-    pub file_name: Option<String>,
-    pub file_hash: Option<String>,
-    pub file_mtime: Option<Timestamp>,
-
-    /// Indexing state for the search/RAG pipeline.
+    // Состояние индексирования (для search и cards).
     pub indexing_status: IndexingStatus,
     pub indexing_error: Option<String>,
     pub indexed_at: Option<Timestamp>,
@@ -93,8 +76,9 @@ pub struct Note {
     pub embedding_dimension: Option<i64>,
     pub indexing_version: Option<String>,
 
+    // Жизненный цикл.
     pub is_archived: bool,
-    pub is_deleted: bool,
+    pub is_deleted: bool,          // soft delete для синхронизации
 
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -106,7 +90,6 @@ pub struct NewNote {
     pub title: String,
     pub content: String,
     pub tags: Option<String>,
-    pub file_path: Option<String>,
 }
 
 /// A historical revision of a note's content (stored as a diffy patch
@@ -119,4 +102,3 @@ pub struct NoteRevision {
     pub patch: String,
     pub created_at: Timestamp,
 }
-

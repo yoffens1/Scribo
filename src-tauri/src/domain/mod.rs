@@ -11,6 +11,7 @@ pub mod fragment;
 pub mod note;
 pub mod schedule;
 pub mod search;
+pub mod section;
 
 pub use card::{Card, CardId, CardType, NewCard};
 pub use fragment::{Fragment, FragmentId, NewFragment};
@@ -20,6 +21,7 @@ pub use schedule::{
     SchedulerState,
 };
 pub use search::{ScoredHit, SearchHit};
+pub use section::{Section, SectionId, NewSection};
 
 /// Unix timestamp in seconds. Single shared alias to avoid `i64` everywhere.
 pub type Timestamp = i64;

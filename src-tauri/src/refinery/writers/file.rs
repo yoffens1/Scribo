@@ -4,7 +4,7 @@ use crate::DbState;
 use crate::ai::LlmService;
 use crate::ai::types::Message;
 use crate::refinery::types::WriteOperation;
-use crate::db::hash::compute_file_hash;
+use crate::db::hash::content_hash;
 use std::sync::Arc;
 
 pub struct FileWriterContext {
@@ -24,14 +24,14 @@ impl FileWriter {
         Self { ctx }
     }
 
-    pub async fn execute(&self, op: &WriteOperation, source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
+    pub async fn execute(&self, op: &WriteOperation, _source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
         match op {
             WriteOperation::CreateFile { path, content } => {
                 if let Some(parent) = Path::new(path).parent() {
                     fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
                 fs::write(path, content).await.map_err(|e| e.to_string())?;
-                self.sync_database(path, content, source_note_id, db_state).await?;
+                self.sync_database(path, content, db_state).await?;
             }
             WriteOperation::MergeFragment { source_file: _, target_file, fragment_text } => {
                 let merged_content = self.merge_card_content(target_file, fragment_text).await?;
@@ -39,7 +39,7 @@ impl FileWriter {
                     fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
                 fs::write(target_file, &merged_content).await.map_err(|e| e.to_string())?;
-                self.sync_database(target_file, &merged_content, source_note_id, db_state).await?;
+                self.sync_database(target_file, &merged_content, db_state).await?;
             }
             WriteOperation::CreateFolder { path } => {
                 fs::create_dir_all(path).await.map_err(|e| e.to_string())?;
@@ -50,8 +50,10 @@ impl FileWriter {
                 }
                 fs::rename(from, to).await.map_err(|e| e.to_string())?;
                 if let Some(state) = db_state {
+                    let old_title = Path::new(from).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                    let new_title = Path::new(to).file_stem().unwrap_or_default().to_string_lossy().into_owned();
                     let _ = state.with_conn(|conn| {
-                        conn.execute("UPDATE notes SET file_path = ? WHERE file_path = ?", [to, from])?;
+                        conn.execute("UPDATE notes SET title = ? WHERE title = ?", [new_title, old_title])?;
                         Ok(())
                     });
                 }
@@ -59,11 +61,12 @@ impl FileWriter {
             WriteOperation::DeleteFile { path } => {
                 let _ = fs::remove_file(path).await;
                 if let Some(state) = db_state {
+                    let title = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().into_owned();
                     let _ = state.with_conn(|conn| {
                         if self.ctx.delete_from_db_on_gc {
-                            conn.execute("DELETE FROM notes WHERE file_path = ?", [path])?;
+                            conn.execute("DELETE FROM notes WHERE title = ?", [&title])?;
                         } else {
-                            conn.execute("UPDATE notes SET is_deleted = 1 WHERE file_path = ?", [path])?;
+                            conn.execute("UPDATE notes SET is_deleted = 1 WHERE title = ?", [&title])?;
                         }
                         Ok(())
                     });
@@ -181,36 +184,32 @@ impl FileWriter {
         Vec::new()
     }
 
-    async fn sync_database(&self, file_path: &str, content: &str, source_note_id: Option<i64>, db_state: Option<&DbState>) -> Result<(), String> {
+    async fn sync_database(&self, file_path: &str, content: &str, db_state: Option<&DbState>) -> Result<(), String> {
         if let Some(state) = db_state {
-            let file_hash = compute_file_hash(content);
+            let file_hash = content_hash(content);
             let file_name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let title = Path::new(&file_name).file_stem().unwrap_or_default().to_string_lossy().into_owned();
             
-            let mtime = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
-            let file_path_clone = file_path.to_string();
+            let mtime = crate::db::time::now_seconds();
 
             let _ = state.with_conn(move |conn| {
-                let mut stmt = conn.prepare("SELECT note_id FROM notes WHERE file_path = ?")?;
-                let mut rows = stmt.query([&file_path_clone])?;
-                let note_id = if let Some(row) = rows.next()? {
+                let mut stmt = conn.prepare("SELECT note_id FROM notes WHERE title = ?")?;
+                let mut rows = stmt.query([&title])?;
+                let _note_id = if let Some(row) = rows.next()? {
                     let id: i64 = row.get(0)?;
                     conn.execute(
-                        "UPDATE notes SET file_hash = ?, file_mtime = ?, source_note_id = ?, is_deleted = 0, status = 'indexed', updated_at = ? WHERE note_id = ?",
-                        (&file_hash, mtime, source_note_id, mtime, id)
+                        "UPDATE notes SET content = ?, content_hash = ?, is_deleted = 0, indexing_status = 'indexed', updated_at = ? WHERE note_id = ?",
+                        (content, &file_hash, mtime, id)
                     )?;
                     id
                 } else {
                     conn.execute(
-                        "INSERT INTO notes (file_path, file_name, file_hash, file_mtime, source_note_id, is_deleted, status, updated_at) VALUES (?, ?, ?, ?, ?, 0, 'indexed', ?)",
-                        (&file_path_clone, &file_name, &file_hash, mtime, source_note_id, mtime)
+                        "INSERT INTO notes (title, content, content_hash, is_deleted, indexing_status, updated_at) VALUES (?, ?, ?, 0, 'indexed', ?)",
+                        (&title, content, &file_hash, mtime)
                     )?;
                     conn.last_insert_rowid()
                 };
 
-                conn.execute(
-                    "INSERT OR IGNORE INTO cards (note_id, state, reps, interval_days, ease_factor) VALUES (?, 'new', 0, 0, 2.5)",
-                    [note_id]
-                )?;
                 Ok(())
             });
         }

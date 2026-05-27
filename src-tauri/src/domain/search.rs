@@ -13,6 +13,8 @@ pub struct SearchHit {
     pub text: String,
     /// Title of the parent note, denormalized for convenient UI rendering.
     pub note_title: Option<String>,
+    pub note_file_path: Option<String>,
+    pub snippet: Option<String>,
 }
 
 /// A search hit annotated with a score (cosine similarity, BM25, RRF, etc.).

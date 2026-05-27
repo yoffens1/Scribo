@@ -13,6 +13,9 @@ use crate::error::AppError;
 /// `write_lock` — serializes all write transactions so SQLite's single-writer model
 ///               is enforced in Rust rather than relying on `busy_timeout`.
 pub struct DbState {
+    // We use Option because the Tauri app boots up before the user selects a vault.
+    // The pool is initialized dynamically at runtime via `db_initialize` and can be
+    // swapped if the user changes workspaces.
     pub pool: std::sync::Arc<RwLock<Option<Pool<SqliteConnectionManager>>>>,
     pub reviewer: std::sync::Arc<crate::services::reviewer::ReviewerService>,
     pub write_lock: Mutex<()>,
@@ -27,9 +30,7 @@ impl Default for DbState {
 impl DbState {
     pub fn new() -> Self {
         let pool = std::sync::Arc::new(RwLock::new(None));
-        let schedules_repo = std::sync::Arc::new(crate::db::repos::schedules::SqliteSchedulesRepo::new(pool.clone()));
-        let logs_repo = std::sync::Arc::new(crate::db::repos::review_logs::SqliteReviewLogsRepo::new(pool.clone()));
-        let reviewer = std::sync::Arc::new(crate::services::reviewer::ReviewerService::new(schedules_repo, logs_repo));
+        let reviewer = std::sync::Arc::new(crate::services::reviewer::ReviewerService::new());
 
         Self {
             pool,
@@ -47,5 +48,14 @@ impl DbState {
         let pool = self.pool.read().as_ref().cloned().ok_or(AppError::NotInitialized)?;
         let mut conn = pool.get().map_err(|e| AppError::Other(e.to_string()))?;
         f(&mut conn)
+    }
+
+    #[inline]
+    pub fn with_write<T>(
+        &self,
+        f: impl FnOnce(&mut rusqlite::Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let _guard = self.write_lock.lock();
+        self.with_conn(f)
     }
 }

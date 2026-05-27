@@ -93,13 +93,8 @@ fn dedup_variants(variants: Vec<QueryVariant>) -> Vec<QueryVariant> {
 fn apply_filters(results: Vec<SearchResult>, filters: &Option<RetrieveFilters>) -> Vec<SearchResult> {
     if let Some(ref f) = filters {
         results.into_iter().filter(|r| {
-            if let Some(ref fp) = f.file_path {
-                if &r.fragment_ref.file_path != fp {
-                    return false;
-                }
-            }
-            if let Some(ref folder) = f.folder {
-                if !r.fragment_ref.file_path.starts_with(folder) {
+            if let Some(ref note_id) = f.note_id {
+                if r.fragment_ref.note_id != *note_id {
                     return false;
                 }
             }
@@ -111,17 +106,17 @@ fn apply_filters(results: Vec<SearchResult>, filters: &Option<RetrieveFilters>) 
 }
 
 fn hydrate_texts(state: &DbState, candidates: &mut [SearchResult]) {
-    let mut by_path: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut by_note: HashMap<i64, Vec<usize>> = HashMap::new();
     for (idx, c) in candidates.iter().enumerate() {
         if c.text.is_none() || c.text.as_ref().unwrap().is_empty() {
-            by_path.entry(c.fragment_ref.file_path.clone()).or_default().push(idx);
+            by_note.entry(c.fragment_ref.note_id.0).or_default().push(idx);
         }
     }
 
-    for (file_path, indices) in by_path {
-        if let Ok(fragments) = state.with_conn(|conn| fragments::get_by_file_path(conn, &file_path, false)) {
+    for (note_id, indices) in by_note {
+        if let Ok(fragments) = state.with_conn(|conn| fragments::list_fragments_with_note(conn, Some(note_id), false)) {
             let by_index: HashMap<usize, String> = fragments.into_iter()
-                .map(|ch| (ch.fragment_index as usize, ch.text))
+                .map(|ch| (ch.fragment.fragment_index as usize, ch.fragment.text_clean))
                 .collect();
             for idx in indices {
                 let fragment_idx = candidates[idx].fragment_ref.fragment_index;
@@ -249,9 +244,12 @@ pub async fn retrieve(
         if config.mode == "keyword" || config.mode == "hybrid" {
             if let Ok(hits) = state.with_conn(|conn| fragments::search(conn, &v.text, over_fetch as i64)) {
                 keyword_results = hits.into_iter().map(|h| SearchResult {
-                    fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
-                    score: h.score as f32,
-                    text: Some(h.snippet),
+                    fragment_ref: FragmentRef {
+                        note_id: h.hit.note_id,
+                        fragment_index: h.hit.fragment_index as usize,
+                    },
+                    score: h.score,
+                    text: h.hit.snippet,
                 }).collect();
             }
         }
@@ -273,9 +271,12 @@ pub async fn retrieve(
                 let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
                 if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
                     vector_results = hits.into_iter().map(|h| SearchResult {
-                        fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
-                        score: h.similarity,
-                        text: h.fragment_text,
+                        fragment_ref: FragmentRef {
+                            note_id: h.hit.note_id,
+                            fragment_index: h.hit.fragment_index as usize,
+                        },
+                        score: h.score,
+                        text: Some(h.hit.text),
                     }).collect();
                 }
             }
@@ -307,9 +308,12 @@ pub async fn retrieve(
                     let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
                     if let Ok(hits) = state.with_conn(|conn| fragments::vector_search(conn, &emb_bytes, over_fetch)) {
                         let hyde_results: Vec<SearchResult> = hits.into_iter().map(|h| SearchResult {
-                            fragment_ref: FragmentRef { file_path: h.file_path, fragment_index: h.fragment_index as usize },
-                            score: h.similarity,
-                            text: h.fragment_text,
+                            fragment_ref: FragmentRef {
+                                note_id: h.hit.note_id,
+                                fragment_index: h.hit.fragment_index as usize,
+                            },
+                            score: h.score,
+                            text: Some(h.hit.text),
                         }).collect();
                         variant_lists.push((hyde_results, hyde.weight));
                     }
@@ -367,13 +371,11 @@ pub fn fetch(
 ) -> Result<Vec<FetchResult>, AppError> {
     let include_deleted = query.include_deleted.unwrap_or(false);
     let raw = state.with_conn(|conn| {
-        if let Some(ref fp) = query.file_path {
-            fragments::get_by_file_path(conn, fp, include_deleted)
-        } else if let Some(ref fn_val) = query.file_name {
-            fragments::get_by_file_name(conn, fn_val, include_deleted)
-        } else {
-            fragments::get_all(conn, include_deleted)
-        }
+        fragments::list_fragments_with_note(
+            conn,
+            query.note_id.map(|id| id.0),
+            include_deleted,
+        )
     })?;
 
     let offset = query.offset.unwrap_or(0);
@@ -387,12 +389,12 @@ pub fn fetch(
     };
 
     let results = page.into_iter().map(|ch| FetchResult {
-        fragment_id: Some(ch.id.0),
-        file_path: ch.file_path,
-        fragment_index: ch.fragment_index as usize,
-        fragment_text: Some(ch.text),
-        token_count: ch.token_count,
-        embedding: ch.embedding.unwrap_or_default(),
+        fragment_id: Some(ch.fragment.id.0),
+        note_id: ch.fragment.note_id,
+        fragment_index: ch.fragment.fragment_index as usize,
+        fragment_text: Some(ch.fragment.text_clean),
+        token_count: ch.fragment.token_count,
+        embedding: ch.fragment.embedding.unwrap_or_default(),
     }).collect();
 
     Ok(results)

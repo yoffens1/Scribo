@@ -9,7 +9,7 @@ pub fn rrf(
     let mut fused = HashMap::new();
     for (results, weight) in lists {
         for (rank, r) in results.into_iter().enumerate() {
-            let id = format!("{}\u{0000}{}", r.fragment_ref.file_path, r.fragment_ref.fragment_index);
+            let id = format!("{}\u{0000}{}", r.fragment_ref.note_id.0, r.fragment_ref.fragment_index);
             let contribution = weight / (k + rank as f32 + 1.0);
             let entry = fused.entry(id).or_insert((r, 0.0));
             entry.1 += contribution;

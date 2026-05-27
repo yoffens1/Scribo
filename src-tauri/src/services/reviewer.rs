@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use chrono::Utc;
 use fsrs::{FSRS, MemoryState};
 use serde::{Deserialize, Serialize};
+use rusqlite::Connection;
 
-use crate::db::repos::{ReviewLogsRepo, SchedulesRepo};
+use crate::error::AppError;
 use crate::domain::{NewSchedule, Rating, ReviewLog, Schedule, ScheduleId, SchedulerState, Timestamp};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,40 +12,28 @@ pub struct ReviewResult {
     pub next_review: Timestamp,
 }
 
-pub struct ReviewerService {
-    schedules_repo: Arc<dyn SchedulesRepo>,
-    logs_repo: Arc<dyn ReviewLogsRepo>,
-}
+pub struct ReviewerService;
 
 impl ReviewerService {
-    pub fn new(schedules_repo: Arc<dyn SchedulesRepo>, logs_repo: Arc<dyn ReviewLogsRepo>) -> Self {
-        Self {
-            schedules_repo,
-            logs_repo,
-        }
+    pub fn new() -> Self {
+        Self
     }
 
     /// Fetches a list of schedules that are currently due for review.
-    pub async fn get_due_reviews(&self, limit: i64) -> Result<Vec<Schedule>, String> {
+    pub fn get_due_reviews(&self, conn: &Connection, limit: i64) -> Result<Vec<Schedule>, AppError> {
         let now = Utc::now().timestamp();
-        self.schedules_repo
-            .find_due(now, limit)
-            .await
-            .map_err(|e| e.to_string())
+        crate::db::repos::schedules::find_due(conn, now, limit)
     }
 
     /// Rates a review using the FSRS algorithm, updates the schedule, and logs the review.
-    pub async fn rate_review(&self, schedule_id: ScheduleId, rating: Rating) -> Result<ReviewResult, String> {
+    pub fn rate_review(&self, conn: &Connection, schedule_id: ScheduleId, rating: Rating) -> Result<ReviewResult, AppError> {
         let now = Utc::now().timestamp();
         
-        let schedule = self.schedules_repo
-            .find_by_id(schedule_id)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Schedule not found".to_string())?;
+        let schedule = crate::db::repos::schedules::find_by_id(conn, schedule_id)?
+            .ok_or_else(|| AppError::Other("Schedule not found".to_string()))?;
 
         let fsrs = FSRS::new(Some(&fsrs::DEFAULT_PARAMETERS))
-            .map_err(|e| format!("FSRS error: {}", e))?;
+            .map_err(|e| AppError::Other(format!("FSRS error: {}", e)))?;
 
         let days_elapsed = if let Some(lr) = schedule.last_reviewed {
             let diff = now - lr;
@@ -65,7 +53,7 @@ impl ReviewerService {
 
         let scheduled_cards = fsrs
             .next_states(current_memory_state, 0.90, days_elapsed)
-            .map_err(|e| format!("FSRS error: {}", e))?;
+            .map_err(|e| AppError::Other(format!("FSRS error: {}", e)))?;
 
         let new_state = match rating {
             Rating::Again => scheduled_cards.again,
@@ -99,25 +87,20 @@ impl ReviewerService {
             elapsed_days: Some(days_elapsed as i64),
         };
 
-        self.logs_repo
-            .insert(&log)
-            .await
-            .map_err(|e| e.to_string())?;
+        crate::db::repos::review_logs::insert(conn, &log)?;
 
         // 2. Update the schedule
-        self.schedules_repo
-            .update_state(
-                schedule_id,
-                updated_state,
-                new_state.memory.stability as f64,
-                new_state.memory.difficulty as f64,
-                reps,
-                lapses,
-                Some(now),
-                Some(next_review),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+        crate::db::repos::schedules::update_state(
+            conn,
+            schedule_id,
+            updated_state,
+            new_state.memory.stability as f64,
+            new_state.memory.difficulty as f64,
+            reps,
+            lapses,
+            Some(now),
+            Some(next_review),
+        )?;
 
         Ok(ReviewResult {
             scheduled_days,
@@ -127,32 +110,23 @@ impl ReviewerService {
 
     /// Schedules a note for review in `days` days. If no schedule exists for the note,
     /// a new one is created. Otherwise, the existing schedule's `next_review` is updated.
-    pub async fn schedule_note_in_days(&self, note_id: crate::domain::NoteId, days: i64) -> Result<Schedule, String> {
+    pub fn schedule_note_in_days(&self, conn: &Connection, note_id: crate::domain::NoteId, days: i64) -> Result<Schedule, AppError> {
         let now = Utc::now().timestamp();
         let due_time = now + days * 86400;
 
         let target = crate::domain::ReviewTarget::Note(note_id);
-        let existing = self.schedules_repo
-            .find_by_target(target)
-            .await
-            .map_err(|e| e.to_string())?;
+        let existing = crate::db::repos::schedules::find_by_target(conn, target)?;
 
         if let Some(mut schedule) = existing {
             schedule.next_review = Some(due_time);
-            self.schedules_repo
-                .set_next_review(schedule.id, Some(due_time))
-                .await
-                .map_err(|e| e.to_string())?;
+            crate::db::repos::schedules::set_next_review(conn, schedule.id, Some(due_time))?;
             Ok(schedule)
         } else {
             let new_schedule = NewSchedule {
                 target,
                 initial_due: Some(due_time),
             };
-            let schedule_id = self.schedules_repo
-                .insert(new_schedule)
-                .await
-                .map_err(|e| e.to_string())?;
+            let schedule_id = crate::db::repos::schedules::insert(conn, new_schedule)?;
             
             let schedule = Schedule {
                 id: schedule_id,

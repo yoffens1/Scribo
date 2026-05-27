@@ -10,7 +10,6 @@ fn get_db_path() -> PathBuf {
             return path;
         }
     }
-    // Для удобства разработки создаем базу прямо в текущей директории репозитория
     let mut path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     path.push("scribo_core.db");
     path
@@ -20,7 +19,6 @@ pub fn handle_cli(args: Vec<String>) {
     let db_path = get_db_path();
     let mut conn = Connection::open(&db_path).expect("Failed to open database");
 
-    // Ensure the database is initialized before CLI actions
     if let Err(e) = crate::db::schema::initialize_schema(&mut conn) {
         eprintln!("Warning: Failed to initialize schema: {}", e);
     }
@@ -38,16 +36,8 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let title = &args[2];
             let content = &args[3];
-            conn.execute(
-                "INSERT INTO notes (file_path, file_name, indexing_status, indexed_at) VALUES (?1, ?1, 'indexed', ?2)",
-                (title, 12345_i64),
-            ).unwrap();
-            let note_id = conn.last_insert_rowid();
-            conn.execute(
-                "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (?, 0, ?, X'00')",
-                (note_id, content),
-            ).unwrap();
-            println!("Successfully added note: '{}' (ID: {})", title, note_id);
+            let note_id = crate::db::repos::notes::insert(&conn, title, content, None).unwrap();
+            println!("Successfully added note: '{}' (ID: {})", title, note_id.0);
         }
         "import-dir" => {
             if args.len() < 3 {
@@ -59,59 +49,92 @@ pub fn handle_cli(args: Vec<String>) {
                 println!("Error: Path is not a directory.");
                 return;
             }
-            let mut imported = 0;
-            
-            let tx = conn.transaction().unwrap();
 
-            for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
-                    let title = path.file_name().unwrap().to_str().unwrap().to_string();
-                    let content = std::fs::read_to_string(path).unwrap_or_default();
-                        
-                        let fragmented_result = crate::fragmenter::fragment_paired(content, &crate::fragmenter::FragmentOptions::default());
-                        
-                        let file_path_str = path.to_str().unwrap().to_string();
-                        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                        
-                        tx.execute(
-                            "INSERT OR IGNORE INTO notes (file_path, file_name, indexing_status, indexed_at) VALUES (?1, ?2, 'indexed', ?3)",
-                            (&file_path_str, &title, timestamp),
-                        ).unwrap();
-                        
-                        let note_id: i64 = tx.query_row(
-                            "SELECT note_id FROM notes WHERE file_path = ?1",
-                            (&file_path_str,),
-                            |row| row.get(0)
-                        ).unwrap();
-                        
-                        tx.execute("DELETE FROM fragments WHERE note_id = ?1", (note_id,)).unwrap();
-                        
-                        // Insert proper fragments
-                        for (i, pair) in fragmented_result.pairs.iter().enumerate() {
-                            tx.execute(
-                                "INSERT INTO fragments (note_id, fragment_index, text, embedding) VALUES (?, ?, ?, X'00')",
-                                (note_id, i as i64, &pair.generation),
-                            ).unwrap();
-                        }
-                        
-                        tx.execute(
-                            "INSERT OR IGNORE INTO cards (note_id) VALUES (?)",
-                            (note_id,),
-                        ).unwrap();
-                        let card_id: i64 = tx.last_insert_rowid();
-                        tx.execute(
-                            "INSERT OR IGNORE INTO schedules (target_type, target_id, state)
-                             VALUES ('card', ?, 'new')",
-                            (card_id,),
-                        ).unwrap();
-                        
-                        println!("Imported: {} ({} fragments)", title, fragmented_result.pairs.len());
-                        imported += 1;
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async {
+                let embedder_config = crate::ai::types::EmbedderConfig {
+                    provider: "local".to_string(),
+                    model: Some("granite-embedding-97M-multilingual-r2-BF16".to_string()),
+                    api_key: None,
+                    base_url: None,
+                };
+                let embedder = crate::ai::embedding::Embedder::new(embedder_config);
+
+                let mut md_files = Vec::new();
+                for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
+                        md_files.push(path.to_path_buf());
+                    }
                 }
-            }
-            tx.commit().unwrap();
-            println!("Successfully imported {} markdown notes.", imported);
+
+                println!("Found {} markdown files to import.", md_files.len());
+
+                let mut imported = 0;
+                for path in md_files {
+                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                    let note_id = match crate::services::import::import_markdown_file(&conn, &path) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            eprintln!("Error importing file {:?}: {}", path, e);
+                            continue;
+                        }
+                    };
+
+                    let payload = crate::services::indexer::IndexingPayload {
+                        note_id: note_id.0,
+                        embedding_model: "granite-embedding-97M-multilingual-r2-BF16",
+                        embedding_dim: 384,
+                        indexing_version: "1",
+                    };
+
+                    if let Err(e) = crate::services::indexer::persist_indexed_file(&mut conn, payload) {
+                        eprintln!("Error indexing file {}: {}", file_name, e);
+                        continue;
+                    }
+
+                    let fragments = match crate::db::repos::fragments::list_by_note(&conn, note_id.0) {
+                        Ok(frags) => frags,
+                        Err(e) => {
+                            eprintln!("Error listing fragments for {}: {}", file_name, e);
+                            continue;
+                        }
+                    };
+
+                    let mut fragment_embeddings = Vec::new();
+                    for frag in &fragments {
+                        match embedder.embed(&frag.text_clean).await {
+                            Ok(emb) => {
+                                fragment_embeddings.push((frag.fragment_index, emb));
+                            }
+                            Err(e) => {
+                                eprintln!("Error embedding fragment for {}: {}", file_name, e);
+                            }
+                        }
+                    }
+
+                    let mut error_occurred = false;
+                    for (index, emb) in fragment_embeddings {
+                        let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb);
+                        if let Err(e) = crate::db::repos::fragments::set_embedding(&conn, note_id.0, index, emb_bytes) {
+                            eprintln!("Error saving embedding for {}: {}", file_name, e);
+                            error_occurred = true;
+                            break;
+                        }
+                    }
+
+                    if !error_occurred {
+                        println!("Imported: {} (fragments: {})", file_name, fragments.len());
+                        imported += 1;
+                    }
+                }
+
+                println!("Successfully imported {} markdown notes with embeddings.", imported);
+            });
         }
         "fragment-file" => {
             if args.len() < 3 {
@@ -167,14 +190,10 @@ pub fn handle_cli(args: Vec<String>) {
             }
         }
         "list" => {
-            let mut stmt = conn.prepare("SELECT note_id, file_path FROM notes WHERE is_deleted = 0").unwrap();
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            }).unwrap();
+            let notes = crate::db::repos::notes::get_all(&conn).unwrap();
             println!("--- SCRIBO NOTES ---");
-            for row in rows {
-                let (id, path) = row.unwrap();
-                println!("[ID: {}] {}", id, path);
+            for note in notes {
+                println!("[ID: {}] {}", note.note_id.0, note.title);
             }
         }
         "search" => {
@@ -184,7 +203,7 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let query = &args[2];
             let mut stmt = conn.prepare(
-                "SELECT c.fragment_id, f.file_path, c.text 
+                "SELECT c.fragment_id, f.title, c.text_clean 
                  FROM fragments_fts 
                  JOIN fragments c ON c.fragment_id = fragments_fts.rowid
                  JOIN notes f ON f.note_id = c.note_id
@@ -195,8 +214,8 @@ pub fn handle_cli(args: Vec<String>) {
             }).unwrap();
             println!("Search results for '{}':", query);
             for row in rows {
-                let (id, file, text) = row.unwrap();
-                println!("-> {} (Fragment ID: {})\n   \"{}\"\n", file, id, text.trim());
+                let (id, title, text) = row.unwrap();
+                println!("-> {} (Fragment ID: {})\n   \"{}\"\n", title, id, text.trim());
             }
         }
         _ => {

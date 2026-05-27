@@ -25,13 +25,12 @@ pub fn fragment_paired(content: String, options: &FragmentOptions) -> Fragmenter
     let (struct_fragments, metadata) = run_pipeline(&content, &options.for_mode(FragmentMode::Structural));
 
     let embed_opts = options.for_mode(FragmentMode::Embedding);
-    let gen_opts = options.for_mode(FragmentMode::Generation);
 
     let pairs: Vec<FragmenterPair> = struct_fragments
         .par_iter()
         .map(|raw| FragmenterPair {
             embedding: clean_fragment(raw, &embed_opts),
-            generation: clean_fragment(raw, &gen_opts),
+            generation: raw.to_string(),
         })
         .collect();
 

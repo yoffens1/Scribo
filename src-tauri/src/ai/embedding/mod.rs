@@ -99,6 +99,7 @@ fn known_dim(model: &str) -> Option<usize> {
         _ if m.contains("minilm-l6")              => Some(384),
         _ if m.contains("nomic-embed")            => Some(768),
         _ if m.contains("arctic-embed-s")         => Some(384),
+        _ if m.contains("granite-embedding")      => Some(384),
         _ if m.contains("qwen3-embedding")        => Some(4096),
         _ if m.contains("text-embedding-3-small") => Some(1536),
         _ if m.contains("text-embedding-3-large") => Some(3072),

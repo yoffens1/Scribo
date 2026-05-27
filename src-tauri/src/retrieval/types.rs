@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::ai::LlmConfig;
+use crate::domain::note::NoteId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +34,7 @@ pub struct RetrievalConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FragmentRef {
-    pub file_path: String,
+    pub note_id: NoteId,
     pub fragment_index: usize,
 }
 
@@ -48,8 +49,7 @@ pub struct SearchResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetrieveFilters {
-    pub file_path: Option<String>,
-    pub folder: Option<String>,
+    pub note_id: Option<NoteId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,8 +62,7 @@ pub struct RetrieveOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchQuery {
-    pub file_path: Option<String>,
-    pub file_name: Option<String>,
+    pub note_id: Option<NoteId>,
     pub include_deleted: Option<bool>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
@@ -73,7 +72,7 @@ pub struct FetchQuery {
 #[serde(rename_all = "camelCase")]
 pub struct FetchResult {
     pub fragment_id: Option<i64>,
-    pub file_path: String,
+    pub note_id: NoteId,
     pub fragment_index: usize,
     pub fragment_text: Option<String>,
     pub token_count: Option<i64>,
