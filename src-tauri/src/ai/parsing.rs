@@ -1,6 +1,6 @@
 pub fn extract_json_payload(raw: &str) -> Option<String> {
-    let start_idx = raw.find('{')?;
-    let end_idx = raw.rfind('}')?;
+    let start_idx = raw.find(|c| c == '{' || c == '[')?;
+    let end_idx = raw.rfind(|c| c == '}' || c == ']')?;
     if end_idx > start_idx {
         Some(raw[start_idx..=end_idx].to_string())
     } else {
@@ -38,6 +38,14 @@ Hope this helps!"#;
     fn test_extract_single_bracket() {
         let raw = "{";
         assert_eq!(extract_json_payload(raw), None);
+    }
+
+    #[test]
+    fn test_extract_json_array() {
+        let raw = r#"```json
+[{"name": "test"}]
+```"#;
+        assert_eq!(extract_json_payload(raw), Some(r#"[{"name": "test"}]"#.to_string()));
     }
 }
 

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use crate::error::AppError;
-use crate::domain::distribute::{DraftDistributionPlan, DistributeAction};
+use crate::domain::distribute::{DraftDistributionPlan, DistributeAction, ChunkDistributionPlan};
 use crate::domain::note::{NoteId, NewNote, IndexingStatus, NoteLifecycle};
 
 pub fn apply_distribution(
@@ -9,8 +9,44 @@ pub fn apply_distribution(
 ) -> Result<Vec<i64>, AppError> {
     let result_json = serde_json::to_string(&plan).unwrap_or_default();
     
-    // Create a mutable copy of chunks to resolve "merge_with_chunk" decisions first
+    // 1. Resolve "merge_with_chunk" decisions first
     let mut chunks = plan.chunks.clone();
+    resolve_merge_actions(&mut chunks);
+
+    let mut affected_note_ids = Vec::new();
+
+    // 2. Apply all 'append' actions
+    apply_append_actions(conn, plan.draft_id, &chunks, &mut affected_note_ids)?;
+
+    // 3. Insert new child notes (handling negative parent references and fallback ordering)
+    apply_create_child_actions(conn, &chunks, &mut affected_note_ids)?;
+
+    // 4. Archive the draft note if none of the chunks were skipped.
+    let has_skipped = plan.chunks.iter().any(|c| matches!(c.recommendation.action, DistributeAction::Skip { .. }));
+    if !has_skipped {
+        crate::db::repos::notes::archive_note(conn, plan.draft_id)?;
+    }
+
+    // 5. Log the applied distribution run using pre-serialized result_json
+    let updated = conn.execute(
+        "UPDATE distribution_runs 
+         SET status = 'applied', result_json = ?, applied_at = strftime('%s','now') 
+         WHERE draft_id = ? AND status = 'analyzed'",
+        rusqlite::params![result_json, plan.draft_id],
+    )?;
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO distribution_runs (draft_id, plan_json, result_json, generator_version, status, created_at, applied_at)
+             VALUES (?, ?, ?, 'v1', 'applied', strftime('%s','now'), strftime('%s','now'))",
+            rusqlite::params![plan.draft_id, result_json, result_json],
+        )?;
+    }
+
+    Ok(affected_note_ids)
+}
+
+/// Resolves chunk merges transitively by appending text to target chunks and skipping merged chunks.
+fn resolve_merge_actions(chunks: &mut [ChunkDistributionPlan]) {
     let mut resolved_any = true;
     let mut iterations = 0;
     while resolved_any && iterations < 100 {
@@ -38,11 +74,16 @@ pub fn apply_distribution(
             }
         }
     }
+}
 
-    let mut affected_note_ids = Vec::new();
-
-    // 1. First apply all 'append' actions
-    for chunk in &chunks {
+/// Processes all 'Append' recommendations.
+fn apply_append_actions(
+    conn: &mut Connection,
+    draft_id: i64,
+    chunks: &[ChunkDistributionPlan],
+    affected_note_ids: &mut Vec<i64>,
+) -> Result<(), AppError> {
+    for chunk in chunks {
         if let DistributeAction::Append { target_note_id, .. } = &chunk.recommendation.action {
             let target_id = target_note_id.0;
             let target_note = crate::db::repos::notes::get_by_id(conn, target_id)?
@@ -50,7 +91,7 @@ pub fn apply_distribution(
             
             let separator = format!(
                 "\n\n<!-- imported from draft #{} on {} -->\n",
-                plan.draft_id,
+                draft_id,
                 chrono::Utc::now().to_rfc3339()
             );
             let new_content = if target_note.content.is_empty() {
@@ -67,7 +108,13 @@ pub fn apply_distribution(
                 for tag_str in tags {
                     if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
                         for tag_id in tag_ids {
-                            let _ = crate::db::repos::tags::associate_note_tag(conn, NoteId(target_id), tag_id, crate::domain::tag::TagSource::Ai, None);
+                            let _ = crate::db::repos::tags::associate_note_tag(
+                                conn,
+                                NoteId(target_id),
+                                tag_id,
+                                crate::domain::tag::TagSource::Ai,
+                                None,
+                            );
                             let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, NoteId(target_id), tag_id);
                         }
                     }
@@ -75,10 +122,17 @@ pub fn apply_distribution(
             }
         }
     }
+    Ok(())
+}
 
-    // 2. Insert new child notes resolving temporary negative parent IDs
+/// Processes all 'CreateChild' recommendations.
+fn apply_create_child_actions(
+    conn: &mut Connection,
+    chunks: &[ChunkDistributionPlan],
+    affected_note_ids: &mut Vec<i64>,
+) -> Result<(), AppError> {
     let mut inserted_notes = std::collections::HashMap::new();
-    let mut pending_creations: Vec<crate::domain::distribute::ChunkDistributionPlan> = chunks.iter()
+    let mut pending_creations: Vec<ChunkDistributionPlan> = chunks.iter()
         .filter(|c| matches!(c.recommendation.action, DistributeAction::CreateChild { .. }))
         .cloned()
         .collect();
@@ -139,7 +193,13 @@ pub fn apply_distribution(
                     for tag_str in tags {
                         if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
                             for tag_id in tag_ids {
-                                let _ = crate::db::repos::tags::associate_note_tag(conn, new_id, tag_id, crate::domain::tag::TagSource::Ai, None);
+                                let _ = crate::db::repos::tags::associate_note_tag(
+                                    conn,
+                                    new_id,
+                                    tag_id,
+                                    crate::domain::tag::TagSource::Ai,
+                                    None,
+                                );
                                 let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
                             }
                         }
@@ -179,36 +239,20 @@ pub fn apply_distribution(
             for tag_str in tags {
                 if let Ok(tag_ids) = crate::db::repos::tags::parse_and_resolve_tags(conn, tag_str) {
                     for tag_id in tag_ids {
-                        let _ = crate::db::repos::tags::associate_note_tag(conn, new_id, tag_id, crate::domain::tag::TagSource::Ai, None);
+                        let _ = crate::db::repos::tags::associate_note_tag(
+                            conn,
+                            new_id,
+                            tag_id,
+                            crate::domain::tag::TagSource::Ai,
+                            None,
+                        );
                         let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
                     }
                 }
             }
         }
     }
-
-    // Only archive the draft note if none of the chunks were skipped.
-    let has_skipped = plan.chunks.iter().any(|c| matches!(c.recommendation.action, DistributeAction::Skip { .. }));
-    if !has_skipped {
-        crate::db::repos::notes::archive_note(conn, plan.draft_id)?;
-    }
-
-    // Log the applied distribution run using pre-serialized result_json
-    let updated = conn.execute(
-        "UPDATE distribution_runs 
-         SET status = 'applied', result_json = ?, applied_at = strftime('%s','now') 
-         WHERE draft_id = ? AND status = 'analyzed'",
-        rusqlite::params![result_json, plan.draft_id],
-    )?;
-    if updated == 0 {
-        conn.execute(
-            "INSERT INTO distribution_runs (draft_id, plan_json, result_json, generator_version, status, created_at, applied_at)
-             VALUES (?, ?, ?, 'v1', 'applied', strftime('%s','now'), strftime('%s','now'))",
-            rusqlite::params![plan.draft_id, result_json, result_json],
-        )?;
-    }
-
-    Ok(affected_note_ids)
+    Ok(())
 }
 
 #[cfg(test)]

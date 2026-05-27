@@ -98,7 +98,7 @@ impl LocalLlm {
         
         let mut sampler = LlamaSampler::greedy();
         let mut n_cur = batch.n_tokens();
-        let target = batch.n_tokens() + max_tokens.unwrap_or(256) as i32;
+        let target = batch.n_tokens() + max_tokens.unwrap_or(2048) as i32;
 
         while n_cur < target {
             let new_token = sampler.sample(&ctx, batch.n_tokens() - 1);

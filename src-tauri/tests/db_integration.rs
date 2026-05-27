@@ -686,6 +686,11 @@ mod tests {
             let tags = parse_and_resolve_tags(conn, "#Chemistry/Microscope/Atom #important").unwrap();
             assert_eq!(tags.len(), 2);
             
+            // Try tag without # prefix
+            let tags_no_hash = parse_and_resolve_tags(conn, "Chemistry/Microscope/Atom").unwrap();
+            assert_eq!(tags_no_hash.len(), 1);
+            assert_eq!(tags_no_hash[0], tags[0]);
+            
             // Check resolved leaf tags
             let atom_tag = get_by_path(conn, "chemistry/microscope/atom").unwrap().unwrap();
             let important_tag = get_by_path(conn, "important").unwrap().unwrap();

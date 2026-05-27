@@ -251,7 +251,13 @@ pub fn move_tag(conn: &Connection, tag_id: TagId, new_parent_id: Option<TagId>) 
 }
 
 pub fn parse_and_resolve_tags(conn: &Connection, input: &str) -> Result<Vec<TagId>, AppError> {
-    let raw_tags = extract_raw_tags(input);
+    let mut raw_tags = extract_raw_tags(input);
+    if raw_tags.is_empty() {
+        let clean = input.trim().trim_start_matches('#');
+        if !clean.is_empty() && clean.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '/') {
+            raw_tags.push(clean.to_string());
+        }
+    }
     let mut result = Vec::new();
     for raw in raw_tags {
         let parts: Vec<&str> = raw.split('/').collect();

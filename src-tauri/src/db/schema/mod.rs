@@ -275,7 +275,15 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
 
             // 1. Migrate notes table
             conn.execute_batch(
-                "CREATE TABLE notes_new (
+                "DROP TRIGGER IF EXISTS schedules_cascade_card_delete;
+                 DROP TRIGGER IF EXISTS schedules_cascade_note_delete;
+                 DROP TRIGGER IF EXISTS schedules_check_target_insert;
+                 DROP TRIGGER IF EXISTS schedules_check_target_update;
+
+                 DROP TABLE IF EXISTS notes_new;
+                 DROP TABLE IF EXISTS cards_new;
+
+                 CREATE TABLE notes_new (
                      note_id              INTEGER PRIMARY KEY AUTOINCREMENT,
                      title                TEXT NOT NULL DEFAULT '',
                      content              TEXT NOT NULL DEFAULT '',
@@ -391,6 +399,59 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
                      SET status = 'orphaned',
                          last_section_snapshot = OLD.raw_text
                      WHERE chunk_id = OLD.chunk_id;
+                 END;
+                "
+            )?;
+
+            // 4. Drop and recreate schedules triggers that referenced notes/cards
+            conn.execute_batch(
+                "DROP TRIGGER IF EXISTS schedules_cascade_card_delete;
+                 DROP TRIGGER IF EXISTS schedules_cascade_note_delete;
+                 DROP TRIGGER IF EXISTS schedules_check_target_insert;
+                 DROP TRIGGER IF EXISTS schedules_check_target_update;
+
+                 CREATE TRIGGER schedules_cascade_card_delete
+                 AFTER DELETE ON cards
+                 FOR EACH ROW
+                 BEGIN
+                    DELETE FROM schedules
+                    WHERE target_type = 'card' AND target_id = OLD.card_id;
+                 END;
+
+                 CREATE TRIGGER schedules_cascade_note_delete
+                 AFTER DELETE ON notes
+                 FOR EACH ROW
+                 BEGIN
+                    DELETE FROM schedules
+                    WHERE target_type = 'note' AND target_id = OLD.note_id;
+                 END;
+
+                 CREATE TRIGGER schedules_check_target_insert
+                 BEFORE INSERT ON schedules
+                 FOR EACH ROW
+                 BEGIN
+                    SELECT CASE
+                        WHEN NEW.target_type = 'card'
+                             AND NOT EXISTS (SELECT 1 FROM cards WHERE card_id = NEW.target_id)
+                            THEN RAISE(ABORT, 'schedule.target_id does not match an existing card')
+                        WHEN NEW.target_type = 'note'
+                             AND NOT EXISTS (SELECT 1 FROM notes WHERE note_id = NEW.target_id)
+                            THEN RAISE(ABORT, 'schedule.target_id does not match an existing note')
+                    END;
+                 END;
+
+                 CREATE TRIGGER schedules_check_target_update
+                 BEFORE UPDATE OF target_type, target_id ON schedules
+                 FOR EACH ROW
+                 BEGIN
+                    SELECT CASE
+                        WHEN NEW.target_type = 'card'
+                             AND NOT EXISTS (SELECT 1 FROM cards WHERE card_id = NEW.target_id)
+                            THEN RAISE(ABORT, 'schedule.target_id does not match an existing card')
+                        WHEN NEW.target_type = 'note'
+                             AND NOT EXISTS (SELECT 1 FROM notes WHERE note_id = NEW.target_id)
+                            THEN RAISE(ABORT, 'schedule.target_id does not match an existing note')
+                    END;
                  END;
                 "
             )?;
