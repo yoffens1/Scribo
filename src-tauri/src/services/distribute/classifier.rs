@@ -62,3 +62,71 @@ pub fn apply_heuristic_linking(chunks: &mut [ChunkDistributionPlan]) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::distribute::{ChunkDistributionPlan, LlmRecommendation, DistributeAction};
+    use crate::domain::NoteId;
+
+    #[test]
+    fn test_apply_heuristic_linking_success() {
+        // Create 2 chunks: one creates "Calculus", other creates "Calculus Limits"
+        // "Calculus Limits" should be linked as child of "Calculus"
+        let rec_parent = LlmRecommendation {
+            action: DistributeAction::CreateChild {
+                parent_note_id: None,
+                new_note_title: "Calculus".to_string(),
+            },
+            tags: None,
+            confidence: None,
+            reason: "Creating Calculus".to_string(),
+        };
+
+        let rec_child = LlmRecommendation {
+            action: DistributeAction::CreateChild {
+                parent_note_id: None,
+                new_note_title: "Calculus Limits".to_string(),
+            },
+            tags: None,
+            confidence: None,
+            reason: "Limits subtopic of Calculus".to_string(),
+        };
+
+        let mut chunks = vec![
+            ChunkDistributionPlan {
+                chunk_index: 0,
+                text: "Limits info".to_string(),
+                suggested_title: "Limits".to_string(),
+                candidates: vec![],
+                recommendation: rec_child,
+            },
+            ChunkDistributionPlan {
+                chunk_index: 1,
+                text: "Calculus info".to_string(),
+                suggested_title: "Calculus".to_string(),
+                candidates: vec![],
+                recommendation: rec_parent,
+            },
+        ];
+
+        apply_heuristic_linking(&mut chunks);
+
+        // Check if chunk 0 (Calculus Limits) got parent_note_id linked to chunk 1 (Calculus)
+        // Since chunk 1 is at index 1, its temp ID is -(1 + 1) = -2
+        if let DistributeAction::CreateChild { parent_note_id, new_note_title } = &chunks[0].recommendation.action {
+            assert_eq!(*parent_note_id, Some(NoteId(-2)));
+            assert_eq!(new_note_title, "Calculus Limits");
+        } else {
+            panic!("Expected CreateChild action on chunk 0");
+        }
+
+        // Chunk 1 should remain parentless
+        if let DistributeAction::CreateChild { parent_note_id, .. } = &chunks[1].recommendation.action {
+            assert_eq!(*parent_note_id, None);
+        } else {
+            panic!("Expected CreateChild action on chunk 1");
+        }
+    }
+}
+

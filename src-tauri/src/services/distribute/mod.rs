@@ -86,10 +86,10 @@ pub async fn analyze_draft_for_distribution(
                 Err(e) => {
                     for _ in 0..chunks.len() {
                         recommendations.push(LlmRecommendation {
-                            action: DistributeAction::Skip { reason: format!("Failed to parse batch JSON: {}. Raw: {}", e, res.text) },
+                            action: DistributeAction::Skip,
                             tags: None,
                             confidence: None,
-                            reason: "Failed to parse batch JSON".to_string(),
+                            reason: format!("Failed to parse batch JSON: {}. Raw: {}", e, res.text),
                         });
                     }
                 }
@@ -99,7 +99,7 @@ pub async fn analyze_draft_for_distribution(
 
     while recommendations.len() < chunks.len() {
         recommendations.push(LlmRecommendation {
-            action: DistributeAction::Skip { reason: "LLM returned incomplete recommendations".to_string() },
+            action: DistributeAction::Skip,
             tags: None,
             confidence: None,
             reason: "LLM returned incomplete recommendations".to_string(),

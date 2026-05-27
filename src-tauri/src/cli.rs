@@ -346,8 +346,8 @@ pub fn handle_cli(args: Vec<String>) {
                         crate::domain::distribute::DistributeAction::MergeWithChunk { chunk_index } => {
                             println!("  Merge with Chunk Index: {}", chunk_index);
                         }
-                        crate::domain::distribute::DistributeAction::Skip { reason } => {
-                            println!("  Skip Reason: {}", reason);
+                        crate::domain::distribute::DistributeAction::Skip => {
+                            // Reason is already printed under general recommendation details
                         }
                     }
                     println!("  Reason: {}", chunk.recommendation.reason);

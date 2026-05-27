@@ -30,7 +30,8 @@ pub fn apply_distribution(
                             chunks[target_idx].text.push_str(&text_to_append);
                         }
                     }
-                    chunks[i].recommendation.action = DistributeAction::Skip { reason: "Merged into another chunk".to_string() };
+                    chunks[i].recommendation.action = DistributeAction::Skip;
+                    chunks[i].recommendation.reason = "Merged into another chunk".to_string();
                     chunks[i].text.clear();
                     resolved_any = true;
                 }

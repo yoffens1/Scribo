@@ -28,7 +28,7 @@ fn test_real_inbox_files() {
     };
 
     let mut processed_files = 0;
-    let opts = ChunkOptions::default();
+    let opts = FragmentOptions::default();
 
     for entry_res in entries {
         if let Ok(entry) = entry_res {
@@ -47,7 +47,7 @@ fn test_real_inbox_files() {
                 println!("Verifying chunking for real note: {}", filename);
                 
                 // Ensure no panic when chunking real Obsidian notes
-                let result = chunk_paired(content, &opts);
+                let result = fragment_paired(content, &opts);
                 
                 // Simple validation: if note is non-empty, we should get some chunks
                 if !path.metadata().map(|m| m.len() == 0).unwrap_or(false) {

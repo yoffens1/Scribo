@@ -1,8 +1,8 @@
-use scribo_lib::chunker::{ChunkOptions, ChunkMode};
+use scribo_lib::fragmenter::{FragmentOptions, FragmentMode};
 
 #[test]
 fn test_default_options() {
-    let opts = ChunkOptions::default();
+    let opts = FragmentOptions::default();
     assert!(opts.lower_case);
     assert!(opts.remove_links);
     assert!(opts.remove_formatting);
@@ -12,28 +12,28 @@ fn test_default_options() {
     assert!(opts.strip_heading_markers);
     assert!(opts.remove_list_markers);
     assert!(opts.compact_lines);
-    assert!(opts.chunk_by_headings);
+    assert!(opts.fragment_by_headings);
     assert_eq!(opts.heading_level, 2);
-    assert!(opts.include_heading_in_chunks);
+    assert!(opts.include_heading_in_fragments);
     assert!(!opts.separate_sub_headings);
     assert!(opts.keep_subheading_with_content);
     assert!(opts.preserve_tables);
     assert!(opts.linearize_tables);
-    assert!(opts.each_table_row_as_separate_chunk);
-    assert!(!opts.separate_tables_as_chunks);
+    assert!(opts.each_table_row_as_separate_fragment);
+    assert!(!opts.separate_tables_as_fragments);
     assert_eq!(opts.max_tokens, 256);
     assert_eq!(opts.overlap_tokens, 0);
 }
 
 #[test]
 fn test_preset_embedding() {
-    let base = ChunkOptions {
+    let base = FragmentOptions {
         max_tokens: 123,
         overlap_tokens: 45,
         preserve_tables: false,
-        ..ChunkOptions::default()
+        ..FragmentOptions::default()
     };
-    let opts = base.for_mode(ChunkMode::Embedding);
+    let opts = base.for_mode(FragmentMode::Embedding);
     
     // Check invariants that must be preset
     assert!(opts.lower_case);
@@ -41,18 +41,18 @@ fn test_preset_embedding() {
     assert!(opts.remove_formatting);
     assert!(opts.format_latex);
     assert!(opts.linearize_tables);
-    assert!(opts.chunk_by_headings);
+    assert!(opts.fragment_by_headings);
     assert_eq!(opts.heading_level, 2);
-    assert!(opts.include_heading_in_chunks);
+    assert!(opts.include_heading_in_fragments);
     assert!(opts.separate_sub_headings);
-    assert!(opts.separate_tables_as_chunks);
+    assert!(opts.separate_tables_as_fragments);
     assert!(opts.keep_subheading_with_content);
     assert!(opts.remove_rules);
     assert!(opts.compact_lines);
     assert!(opts.remove_numbering);
     assert!(opts.strip_heading_markers);
     assert!(opts.remove_list_markers);
-    assert!(opts.each_table_row_as_separate_chunk);
+    assert!(opts.each_table_row_as_separate_fragment);
     
     // Non-preset fields must preserve user values
     assert_eq!(opts.max_tokens, 123);
@@ -62,11 +62,11 @@ fn test_preset_embedding() {
 
 #[test]
 fn test_preset_generation() {
-    let base = ChunkOptions {
-        each_table_row_as_separate_chunk: false,
-        ..ChunkOptions::default()
+    let base = FragmentOptions {
+        each_table_row_as_separate_fragment: false,
+        ..FragmentOptions::default()
     };
-    let opts = base.for_mode(ChunkMode::Generation);
+    let opts = base.for_mode(FragmentMode::Generation);
     
     // Check invariants that must be preset
     assert!(opts.lower_case);
@@ -78,39 +78,39 @@ fn test_preset_generation() {
     assert!(opts.remove_numbering);
     assert!(opts.strip_heading_markers);
     assert!(opts.remove_list_markers);
-    assert!(opts.chunk_by_headings);
+    assert!(opts.fragment_by_headings);
     assert_eq!(opts.heading_level, 2);
-    assert!(!opts.include_heading_in_chunks);
+    assert!(!opts.include_heading_in_fragments);
     assert!(opts.separate_sub_headings);
     assert!(!opts.keep_subheading_with_content);
     assert!(!opts.linearize_tables);
-    assert!(opts.separate_tables_as_chunks);
+    assert!(opts.separate_tables_as_fragments);
     assert!(opts.preserve_tables);
     assert_eq!(opts.max_tokens, usize::MAX);
     assert_eq!(opts.overlap_tokens, 0);
     
     // Non-preset fields must preserve user values
-    assert!(!opts.each_table_row_as_separate_chunk);
+    assert!(!opts.each_table_row_as_separate_fragment);
 }
 
 #[test]
 fn test_preset_structural() {
-    let base = ChunkOptions {
-        chunk_by_headings: false,
+    let base = FragmentOptions {
+        fragment_by_headings: false,
         heading_level: 4,
-        include_heading_in_chunks: false,
+        include_heading_in_fragments: false,
         separate_sub_headings: true,
         keep_subheading_with_content: false,
         preserve_tables: false,
-        separate_tables_as_chunks: true,
+        separate_tables_as_fragments: true,
         linearize_tables: false,
-        each_table_row_as_separate_chunk: false,
+        each_table_row_as_separate_fragment: false,
         max_tokens: 500,
         overlap_tokens: 50,
-        ..ChunkOptions::default()
+        ..FragmentOptions::default()
     };
     
-    let opts = base.for_mode(ChunkMode::Structural);
+    let opts = base.for_mode(FragmentMode::Structural);
     
     // Clean rules must be false
     assert!(!opts.lower_case);
@@ -124,22 +124,22 @@ fn test_preset_structural() {
     assert!(!opts.compact_lines);
     
     // Custom structural attributes must remain
-    assert!(!opts.chunk_by_headings);
+    assert!(!opts.fragment_by_headings);
     assert_eq!(opts.heading_level, 4);
-    assert!(!opts.include_heading_in_chunks);
+    assert!(!opts.include_heading_in_fragments);
     assert!(opts.separate_sub_headings);
     assert!(!opts.keep_subheading_with_content);
     assert!(!opts.preserve_tables);
-    assert!(opts.separate_tables_as_chunks);
+    assert!(opts.separate_tables_as_fragments);
     assert!(!opts.linearize_tables);
-    assert!(!opts.each_table_row_as_separate_chunk);
+    assert!(!opts.each_table_row_as_separate_fragment);
     assert_eq!(opts.max_tokens, 500);
     assert_eq!(opts.overlap_tokens, 50);
 }
 
 /// Helper validator function that enforces option invariants dynamically.
 /// Prints violations to stderr in ANSI red and panics.
-pub fn validate_config_invariants(chunks: &[String], opts: &ChunkOptions) {
+pub fn validate_config_invariants(chunks: &[String], opts: &FragmentOptions) {
     for chunk in chunks {
         let trimmed = chunk.trim();
         if trimmed.is_empty() {
@@ -177,8 +177,6 @@ pub fn validate_config_invariants(chunks: &[String], opts: &ChunkOptions) {
         // 4. remove_formatting: true -> Check for formatting symbols
         if opts.remove_formatting {
             // Since markdown stripping removes formatting wrappers, we check if standard double markers remain.
-            // Note: simple occurrences are allowed, but pairs like **something** shouldn't be here.
-            // As a basic heuristic, check for common patterns:
             if chunk.contains("**") || chunk.contains("~~") || chunk.contains("==") {
                 report_failure("remove_formatting", chunk, "Found formatting markers (**, ~~ or ==).");
             }

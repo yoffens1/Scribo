@@ -1,4 +1,4 @@
-use scribo_lib::chunker::markdown::table::*;
+use scribo_lib::fragmenter::markdown::table::*;
 
 #[test]
 fn test_extract_tables_valid() {
