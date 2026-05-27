@@ -4,3 +4,4 @@ pub mod validation;
 pub mod notesearch;
 pub mod reviewer;
 pub mod import;
+pub mod distribute;
