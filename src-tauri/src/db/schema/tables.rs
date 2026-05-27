@@ -15,6 +15,13 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              content_hash         TEXT NOT NULL DEFAULT '',
              tags                 TEXT,
 
+             -- Иерархия
+             parent_note_id       INTEGER REFERENCES notes(note_id) ON DELETE SET NULL,
+             path_cached          TEXT NOT NULL DEFAULT '',
+             sort_order           INTEGER NOT NULL DEFAULT 0,
+             icon                 TEXT,
+
+             -- Индексация и типы
              indexing_status      TEXT NOT NULL DEFAULT 'pending'
                  CHECK (indexing_status IN ('pending','indexing','indexed','failed','stale')),
              indexing_error       TEXT,
@@ -23,8 +30,15 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              embedding_dimension  INTEGER,
              indexing_version     TEXT,
 
+             is_draft             INTEGER NOT NULL DEFAULT 0,
              is_archived          INTEGER NOT NULL DEFAULT 0,
              is_deleted           INTEGER NOT NULL DEFAULT 0,
+             is_pinned            INTEGER NOT NULL DEFAULT 0,
+             is_favorite          INTEGER NOT NULL DEFAULT 0,
+
+             -- Метаданные обучения
+             mastery              REAL,
+             last_studied         INTEGER,
 
              created_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now'))
@@ -171,6 +185,10 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
               WHERE indexing_status != 'indexed';
           CREATE INDEX IF NOT EXISTS idx_notes_active ON notes(updated_at DESC)
               WHERE is_deleted = 0 AND is_archived = 0;
+          CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_note_id) WHERE is_deleted = 0;
+          CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path_cached);
+          CREATE INDEX IF NOT EXISTS idx_notes_drafts ON notes(updated_at DESC) WHERE is_draft = 1;
+          CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(updated_at DESC) WHERE is_pinned = 1 AND is_deleted = 0;
 
           CREATE INDEX IF NOT EXISTS idx_fragments_note_id ON fragments(note_id);
           CREATE INDEX IF NOT EXISTS idx_sections_note_id ON sections(note_id);

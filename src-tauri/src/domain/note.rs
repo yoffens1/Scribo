@@ -66,7 +66,13 @@ pub struct Note {
     pub title: String,
     pub content: String,           // raw markdown
     pub content_hash: String,      // blake3 от нормализованного content
-    pub tags: Option<String>,      // CSV или JSON-строка, выноси в Vec<String> при чтении
+    pub tags: Option<String>,
+
+    // Иерархия
+    pub parent_note_id: Option<NoteId>,
+    pub path_cached: String,
+    pub sort_order: i64,
+    pub icon: Option<String>,
 
     // Состояние индексирования (для search и cards).
     pub indexing_status: IndexingStatus,
@@ -77,19 +83,33 @@ pub struct Note {
     pub indexing_version: Option<String>,
 
     // Жизненный цикл.
+    pub is_draft: bool,
     pub is_archived: bool,
     pub is_deleted: bool,          // soft delete для синхронизации
+    pub is_pinned: bool,
+    pub is_favorite: bool,
+
+    // Обучение
+    pub mastery: Option<f32>,
+    pub last_studied: Option<Timestamp>,
 
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
 
 /// Input for creating a new note. The repository assigns the id and timestamps.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NewNote {
     pub title: String,
     pub content: String,
     pub tags: Option<String>,
+    pub parent_note_id: Option<NoteId>,
+    pub path_cached: Option<String>,
+    pub sort_order: Option<i64>,
+    pub icon: Option<String>,
+    pub is_draft: bool,
+    pub is_pinned: bool,
+    pub is_favorite: bool,
 }
 
 /// A historical revision of a note's content (stored as a diffy patch

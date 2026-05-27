@@ -12,30 +12,42 @@ pub struct NoteListItem {
 }
 
 fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
-    let status_str: String = row.get(5)?;
+    let parent_note_id: Option<i64> = row.get(5)?;
+    let status_str: String = row.get(9)?;
     Ok(Note {
         id: NoteId(row.get(0)?),
         title: row.get(1)?,
         content: row.get(2)?,
         content_hash: row.get(3)?,
         tags: row.get(4)?,
+        parent_note_id: parent_note_id.map(NoteId),
+        path_cached: row.get(6)?,
+        sort_order: row.get(7)?,
+        icon: row.get(8)?,
         indexing_status: IndexingStatus::parse(&status_str).unwrap_or(IndexingStatus::Pending),
-        indexing_error: row.get(6)?,
-        indexed_at: row.get(7)?,
-        embedding_model: row.get(8)?,
-        embedding_dimension: row.get(9)?,
-        indexing_version: row.get(10)?,
-        is_archived: row.get::<_, i64>(11).unwrap_or(0) != 0,
-        is_deleted: row.get::<_, i64>(12).unwrap_or(0) != 0,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        indexing_error: row.get(10)?,
+        indexed_at: row.get(11)?,
+        embedding_model: row.get(12)?,
+        embedding_dimension: row.get(13)?,
+        indexing_version: row.get(14)?,
+        is_draft: row.get::<_, i64>(15).unwrap_or(0) != 0,
+        is_archived: row.get::<_, i64>(16).unwrap_or(0) != 0,
+        is_deleted: row.get::<_, i64>(17).unwrap_or(0) != 0,
+        is_pinned: row.get::<_, i64>(18).unwrap_or(0) != 0,
+        is_favorite: row.get::<_, i64>(19).unwrap_or(0) != 0,
+        mastery: row.get(20)?,
+        last_studied: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
     })
 }
 
 const SELECT_NOTE_COLUMNS: &str = 
     "SELECT note_id, title, content, content_hash, tags, 
+            parent_note_id, path_cached, sort_order, icon,
             indexing_status, indexing_error, indexed_at, embedding_model, embedding_dimension, 
-            indexing_version, is_archived, is_deleted, created_at, updated_at
+            indexing_version, is_draft, is_archived, is_deleted, is_pinned, is_favorite,
+            mastery, last_studied, created_at, updated_at
      FROM notes";
 
 pub fn get_by_id(conn: &Connection, note_id: i64) -> Result<Option<Note>, AppError> {
@@ -45,20 +57,73 @@ pub fn get_by_id(conn: &Connection, note_id: i64) -> Result<Option<Note>, AppErr
     Ok(record)
 }
 
-pub fn insert(conn: &Connection, title: &str, content: &str, tags: Option<&str>) -> Result<NoteId, AppError> {
+fn get_path_for_note(conn: &Connection, parent_id: Option<NoteId>, title: &str) -> Result<String, AppError> {
+    if let Some(pid) = parent_id {
+        let parent_path: Option<String> = conn.query_row(
+            "SELECT path_cached FROM notes WHERE note_id = ?",
+            [pid.0],
+            |r| r.get(0)
+        ).optional()?;
+        if let Some(p_path) = parent_path {
+            return Ok(format!("{}/{}", p_path, title));
+        }
+    }
+    Ok(title.to_string())
+}
+
+fn recalculate_descendant_paths(conn: &Connection, parent_id: NoteId, parent_path: &str) -> Result<(), AppError> {
+    let mut stmt = conn.prepare("SELECT note_id, title FROM notes WHERE parent_note_id = ? AND is_deleted = 0")?;
+    let mut rows = stmt.query([parent_id.0])?;
+    let mut children = Vec::new();
+    while let Some(row) = rows.next()? {
+        let child_id: i64 = row.get(0)?;
+        let child_title: String = row.get(1)?;
+        children.push((child_id, child_title));
+    }
+    for (child_id, child_title) in children {
+        let child_path = format!("{}/{}", parent_path, child_title);
+        conn.execute(
+            "UPDATE notes SET path_cached = ? WHERE note_id = ?",
+            rusqlite::params![child_path, child_id],
+        )?;
+        recalculate_descendant_paths(conn, NoteId(child_id), &child_path)?;
+    }
+    Ok(())
+}
+
+pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<NoteId, AppError> {
     let now = crate::db::time::now_seconds();
-    let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+    let content_hash = blake3::hash(note.content.as_bytes()).to_hex().to_string();
+
+    let path_cached = match &note.path_cached {
+        Some(p) => p.clone(),
+        None => get_path_for_note(conn, note.parent_note_id, &note.title)?,
+    };
+
+    let parent_id = note.parent_note_id.map(|id| id.0);
+    let sort_order = note.sort_order.unwrap_or(0);
+    let is_draft_int = if note.is_draft { 1 } else { 0 };
+    let is_pinned_int = if note.is_pinned { 1 } else { 0 };
+    let is_favorite_int = if note.is_favorite { 1 } else { 0 };
 
     let note_id: i64 = conn.query_row(
         "INSERT INTO notes (
-            title, content, content_hash, indexing_status, tags, is_archived, is_deleted, created_at, updated_at
-         ) VALUES (?, ?, ?, 'pending', ?, 0, 0, ?, ?)
+            title, content, content_hash, tags, parent_note_id, path_cached, sort_order, icon,
+            indexing_status, is_draft, is_archived, is_deleted, is_pinned, is_favorite, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, ?, ?, ?, ?)
          RETURNING note_id",
         rusqlite::params![
-            title,
-            content,
+            note.title,
+            note.content,
             content_hash,
-            tags,
+            note.tags,
+            parent_id,
+            path_cached,
+            sort_order,
+            note.icon,
+            is_draft_int,
+            is_pinned_int,
+            is_favorite_int,
             now,
             now,
         ],
@@ -100,10 +165,38 @@ pub fn restore(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), A
 }
 
 pub fn rename(conn: &Connection, note_id: i64, new_title: &str, updated_at: i64) -> Result<(), AppError> {
+    let parent_id_opt: Option<i64> = conn.query_row(
+        "SELECT parent_note_id FROM notes WHERE note_id = ?",
+        [note_id],
+        |r| r.get(0)
+    ).optional()?.flatten();
+
+    let new_path = get_path_for_note(conn, parent_id_opt.map(NoteId), new_title)?;
+
     conn.execute(
-        "UPDATE notes SET title = ?, updated_at = ? WHERE note_id = ?",
-        rusqlite::params![new_title, updated_at, note_id],
+        "UPDATE notes SET title = ?, path_cached = ?, updated_at = ? WHERE note_id = ?",
+        rusqlite::params![new_title, new_path, updated_at, note_id],
     )?;
+
+    recalculate_descendant_paths(conn, NoteId(note_id), &new_path)?;
+    Ok(())
+}
+
+pub fn move_note(conn: &Connection, note_id: i64, new_parent_id: Option<NoteId>, updated_at: i64) -> Result<(), AppError> {
+    let title: String = conn.query_row(
+        "SELECT title FROM notes WHERE note_id = ?",
+        [note_id],
+        |r| r.get(0)
+    )?;
+
+    let new_path = get_path_for_note(conn, new_parent_id, &title)?;
+
+    conn.execute(
+        "UPDATE notes SET parent_note_id = ?, path_cached = ?, updated_at = ? WHERE note_id = ?",
+        rusqlite::params![new_parent_id.map(|id| id.0), new_path, updated_at, note_id],
+    )?;
+
+    recalculate_descendant_paths(conn, NoteId(note_id), &new_path)?;
     Ok(())
 }
 

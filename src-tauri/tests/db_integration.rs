@@ -29,13 +29,16 @@ mod tests {
         let db_state = setup_test_db();
 
         db_state.with_conn(|conn| {
+            let note = scribo_lib::domain::note::NewNote {
+                title: "note.md".to_string(),
+                content: "content".to_string(),
+                ..Default::default()
+            };
+            let note_id = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
+
             conn.execute(
-                "INSERT INTO notes (note_id, title, content, content_hash, indexing_status) VALUES (1, 'note.md', 'content', 'hash', 'indexed')",
-                [],
-            ).unwrap();
-            conn.execute(
-                "INSERT INTO sections (section_id, note_id, section_index, text_raw, source_hash) VALUES (1, 1, 0, 'Section 1 text', 'hash1')",
-                [],
+                "INSERT INTO sections (section_id, note_id, section_index, text_raw, source_hash) VALUES (1, ?, 0, 'Section 1 text', 'hash1')",
+                [note_id.0],
             ).unwrap();
             conn.execute(
                 "INSERT INTO cards (card_id, section_id, card_type) VALUES (1, 1, 'heading')",
@@ -79,23 +82,28 @@ mod tests {
     fn test_version_control_diffy() {
         let db_state = setup_test_db();
 
-        db_state.with_conn(|conn| {
-            conn.execute("INSERT INTO notes (note_id, title, content) VALUES (1, 'a.md', 'Line one of text')", []).unwrap();
+        let note_id = db_state.with_conn(|conn| {
+            let note = scribo_lib::domain::note::NewNote {
+                title: "a.md".to_string(),
+                content: "Line one of text".to_string(),
+                ..Default::default()
+            };
+            let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, embedding) VALUES (1, 0, 'Line one of text', 'hash1', X'00')",
-                [],
+                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, embedding) VALUES (?, 0, 'Line one of text', 'hash1', X'00')",
+                [nid.0],
             ).unwrap();
-            Ok(())
+            Ok(nid.0)
         }).unwrap();
 
         let new_text = "Line one of text\nLine two is added".to_string();
         db_state.with_conn(|conn| {
-            update_content_with_diff(conn, 1, &new_text).unwrap();
+            update_content_with_diff(conn, note_id, &new_text).unwrap();
             Ok(())
         }).unwrap();
 
         db_state.with_conn(|conn| {
-            let patch: String = conn.query_row("SELECT patch FROM note_revisions WHERE note_id = 1", [], |r| r.get(0)).unwrap();
+            let patch: String = conn.query_row("SELECT patch FROM note_revisions WHERE note_id = ?", [note_id], |r| r.get(0)).unwrap();
             assert!(patch.contains("+Line two is added"));
             Ok(())
         }).unwrap();
@@ -105,29 +113,34 @@ mod tests {
     async fn test_retrieval_pipeline_and_fetch() {
         let db_state = setup_test_db();
 
-        db_state.with_conn(|conn| {
-            conn.execute("INSERT INTO notes (note_id, title, content) VALUES (1, 'doc.md', 'This is a note about neural networks and machine learning.\nObsidian is a great tool for personal knowledge management.')", []).unwrap();
+        let note_id = db_state.with_conn(|conn| {
+            let note = scribo_lib::domain::note::NewNote {
+                title: "doc.md".to_string(),
+                content: "This is a note about neural networks and machine learning.\nObsidian is a great tool for personal knowledge management.".to_string(),
+                ..Default::default()
+            };
+            let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding) VALUES (1, 0, 'This is a note about neural networks and machine learning.', 'hash1', 10, X'0000803f')",
-                [],
+                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding) VALUES (?, 0, 'This is a note about neural networks and machine learning.', 'hash1', 10, X'0000803f')",
+                [nid.0],
             ).unwrap();
             conn.execute(
-                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding) VALUES (1, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 9, X'0000803f')",
-                [],
+                "INSERT INTO fragments (note_id, fragment_index, text_clean, source_hash, token_count, embedding) VALUES (?, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 9, X'0000803f')",
+                [nid.0],
             ).unwrap();
-            Ok(())
+            Ok(nid.0)
         }).unwrap();
 
         // 1. Test Fetch
         let fetch_query = FetchQuery {
-            note_id: Some(scribo_lib::domain::note::NoteId(1)),
+            note_id: Some(scribo_lib::domain::note::NoteId(note_id)),
             include_deleted: Some(false),
             limit: Some(2),
             offset: Some(0),
         };
         let fetch_res = fetch(&db_state, &fetch_query).unwrap();
         assert_eq!(fetch_res.len(), 2);
-        assert_eq!(fetch_res[0].note_id.0, 1);
+        assert_eq!(fetch_res[0].note_id.0, note_id);
         assert_eq!(fetch_res[0].fragment_index, 0);
 
         // 2. Test Retrieve (Keyword mode)
@@ -146,7 +159,7 @@ mod tests {
 
         let query_res = retrieve(&db_state, "knowledge management", None, &config, &options).await.unwrap();
         assert_eq!(query_res.len(), 1);
-        assert_eq!(query_res[0].fragment_ref.note_id.0, 1);
+        assert_eq!(query_res[0].fragment_ref.note_id.0, note_id);
         assert_eq!(query_res[0].fragment_ref.fragment_index, 1);
     }
 
@@ -159,8 +172,13 @@ mod tests {
 
         db_state.with_conn(|conn| {
             // First we need to insert the note record into the DB with 'pending' status
-            let note_id = scribo_lib::db::repos::notes::insert(conn, &title, &content_v1, None).unwrap();
-            assert_eq!(note_id.0, 1);
+            let note = scribo_lib::domain::note::NewNote {
+                title: title.clone(),
+                content: content_v1.clone(),
+                ..Default::default()
+            };
+            let note_id = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
+            assert!(note_id.0 > 0);
 
             // Index the note for the first time
             let payload = scribo_lib::services::indexer::IndexingPayload {

@@ -1,5 +1,5 @@
 use std::path::Path;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use crate::error::AppError;
 use crate::domain::note::NoteId;
 
@@ -10,18 +10,13 @@ pub fn import_markdown_file(conn: &Connection, path: &Path) -> Result<NoteId, Ap
         .unwrap_or("Untitled")
         .to_string();
 
-    let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
-    let now = crate::db::time::now_seconds();
+    let new_note = crate::domain::note::NewNote {
+        title,
+        content,
+        ..Default::default()
+    };
 
-    let note_id: i64 = conn.query_row(
-        "INSERT INTO notes (title, content, content_hash, indexing_status, created_at, updated_at)
-         VALUES (?, ?, ?, 'pending', ?, ?)
-         RETURNING note_id",
-        params![title, content, content_hash, now, now],
-        |row| row.get(0),
-    )?;
-
-    Ok(NoteId(note_id))
+    crate::db::repos::notes::insert(conn, &new_note)
 }
 
 pub fn import_markdown_directory(conn: &mut Connection, dir: &Path) -> Result<usize, AppError> {

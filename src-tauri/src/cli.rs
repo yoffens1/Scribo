@@ -36,7 +36,12 @@ pub fn handle_cli(args: Vec<String>) {
             }
             let title = &args[2];
             let content = &args[3];
-            let note_id = crate::db::repos::notes::insert(&conn, title, content, None).unwrap();
+            let note = crate::domain::note::NewNote {
+                title: title.clone(),
+                content: content.clone(),
+                ..Default::default()
+            };
+            let note_id = crate::db::repos::notes::insert(&conn, &note).unwrap();
             println!("Successfully added note: '{}' (ID: {})", title, note_id.0);
         }
         "import-dir" => {
