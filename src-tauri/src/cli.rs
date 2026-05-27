@@ -308,7 +308,7 @@ pub fn handle_cli(args: Vec<String>) {
             let state = crate::DbState::new();
             *state.pool.write() = Some(pool);
 
-            let llm_service = crate::ai::LlmService::new(llm_config, None);
+            let llm_service = std::sync::Arc::new(crate::ai::LlmService::new(llm_config, None));
 
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

@@ -6,6 +6,7 @@ pub struct TopicChunk {
     pub suggested_title: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct RawBlock {
     pub range: std::ops::Range<usize>,
     pub text: String,
@@ -22,10 +23,12 @@ pub struct CandidateNote {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmRecommendation {
-    pub action: String, // "append" | "create_child" | "skip"
+    pub action: String, // "append" | "create_child" | "merge_with_chunk" | "skip"
     pub target_note_id: Option<i64>,
     pub new_note_title: Option<String>,
     pub parent_note_id: Option<i64>,
+    pub parent_chunk_index: Option<usize>,
+    pub merge_target_chunk_index: Option<usize>,
     pub reason: String,
 }
 

@@ -2,6 +2,8 @@ use crate::error::AppError;
 use crate::domain::distribute::CandidateNote;
 use crate::ai::LlmService;
 use crate::DbState;
+use crate::retrieval::types::{SearchResult, FragmentRef};
+use std::sync::Arc;
 
 #[allow(async_fn_in_trait)]
 pub trait Retriever: Send + Sync {
@@ -9,7 +11,7 @@ pub trait Retriever: Send + Sync {
         &self,
         state: &DbState,
         text: &str,
-        llm_service: &LlmService,
+        llm_service: &Arc<LlmService>,
     ) -> Result<Vec<CandidateNote>, AppError>;
 }
 
@@ -26,7 +28,7 @@ impl Retriever for VectorRetriever {
         &self,
         state: &DbState,
         text: &str,
-        llm_service: &LlmService,
+        llm_service: &Arc<LlmService>,
     ) -> Result<Vec<CandidateNote>, AppError> {
         let embedding = match llm_service.generate_embeddings(vec![text.to_string()]).await {
             Ok(embs) => {
@@ -43,14 +45,35 @@ impl Retriever for VectorRetriever {
 
         let embedding_bytes = bytemuck::cast_slice::<f32, u8>(&embedding);
         let scored_hits = state.with_conn(|conn| {
-            crate::db::repos::fragments::vector_search(conn, embedding_bytes, 5)
+            crate::db::repos::fragments::vector_search(conn, embedding_bytes, 10)
         })?;
 
+        // Keep a map of note_id -> title for reconstruction
+        let mut title_map = std::collections::HashMap::new();
+        for hit in &scored_hits {
+            title_map.insert(hit.hit.note_id.0, hit.hit.note_title.clone().unwrap_or_else(|| "Untitled".to_string()));
+        }
+
+        // Convert ScoredHits to SearchResults for the reranker
+        let mut search_results: Vec<SearchResult> = scored_hits.into_iter().map(|hit| {
+            SearchResult {
+                fragment_ref: FragmentRef {
+                    note_id: hit.hit.note_id,
+                    fragment_index: hit.hit.fragment_index as usize,
+                },
+                score: hit.score,
+                text: Some(hit.hit.text.clone()),
+            }
+        }).collect();
+
+        // Rerank using retrieval scoring reranker
+        crate::retrieval::rerankers::scoring::rerank_scoring(llm_service, text, &mut search_results).await;
+
         let mut candidates_map: std::collections::HashMap<i64, (String, f32)> = std::collections::HashMap::new();
-        for hit in scored_hits {
-            let note_id = hit.hit.note_id.0;
-            let title = hit.hit.note_title.clone().unwrap_or_else(|| "Untitled".to_string());
-            let sim = hit.score;
+        for res in search_results {
+            let note_id = res.fragment_ref.note_id.0;
+            let title = title_map.get(&note_id).cloned().unwrap_or_else(|| "Untitled".to_string());
+            let sim = res.score;
             candidates_map.entry(note_id)
                 .and_modify(|existing| {
                     if sim > existing.1 {

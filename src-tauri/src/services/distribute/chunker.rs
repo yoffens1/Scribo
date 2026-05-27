@@ -1,8 +1,10 @@
 use pulldown_cmark::{Event, Tag, HeadingLevel, Options, Parser};
 use crate::domain::distribute::{TopicChunk, RawBlock};
+use crate::ai::LlmService;
 
+#[allow(async_fn_in_trait)]
 pub trait Chunker: Send + Sync {
-    fn chunk(&self, content: &str) -> Vec<TopicChunk>;
+    async fn chunk(&self, content: &str, llm_service: &LlmService) -> Vec<TopicChunk>;
 }
 
 pub struct RuleChunker {
@@ -16,8 +18,97 @@ impl RuleChunker {
 }
 
 impl Chunker for RuleChunker {
-    fn chunk(&self, content: &str) -> Vec<TopicChunk> {
+    async fn chunk(&self, content: &str, _llm_service: &LlmService) -> Vec<TopicChunk> {
         split_into_topics(content, self.max_chars)
+    }
+}
+
+pub struct SemanticChunker {
+    pub max_chars: usize,
+    pub threshold: f32,
+}
+
+impl SemanticChunker {
+    pub fn new(max_chars: usize, threshold: f32) -> Self {
+        Self { max_chars, threshold }
+    }
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
+    }
+}
+
+impl Chunker for SemanticChunker {
+    async fn chunk(&self, content: &str, llm_service: &LlmService) -> Vec<TopicChunk> {
+        let raw_blocks = parse_raw_blocks(content);
+        if raw_blocks.is_empty() {
+            return Vec::new();
+        }
+
+        let texts: Vec<String> = raw_blocks.iter().map(|b| b.text.clone()).collect();
+        let embeddings = match llm_service.generate_embeddings(texts.clone()).await {
+            Ok(embs) => embs,
+            Err(_) => vec![vec![0.0f32; 1536]; texts.len()],
+        };
+
+        let mut chunks = Vec::new();
+        let mut current_chunk_blocks = vec![raw_blocks[0].clone()];
+
+        for i in 1..raw_blocks.len() {
+            let sim = if i < embeddings.len() && i - 1 < embeddings.len() {
+                cosine_similarity(&embeddings[i - 1], &embeddings[i])
+            } else {
+                0.0
+            };
+
+            let total_len: usize = current_chunk_blocks.iter().map(|b| b.text.len()).sum();
+            let block_len = raw_blocks[i].text.len();
+
+            if sim < self.threshold || (total_len + block_len > self.max_chars) {
+                let text = current_chunk_blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+                let suggested_title = current_chunk_blocks.iter()
+                    .find_map(|b| b.heading_title.clone())
+                    .unwrap_or_else(|| {
+                        let first_line = current_chunk_blocks[0].text.lines().next().unwrap_or("Untitled").trim();
+                        let clean = first_line.replace("#", "").trim().to_string();
+                        if clean.len() > 40 {
+                            format!("{}...", &clean[..40])
+                        } else {
+                            clean
+                        }
+                    });
+
+                chunks.push(TopicChunk { text, suggested_title });
+                current_chunk_blocks.clear();
+            }
+
+            current_chunk_blocks.push(raw_blocks[i].clone());
+        }
+
+        if !current_chunk_blocks.is_empty() {
+            let text = current_chunk_blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+            let suggested_title = current_chunk_blocks.iter()
+                .find_map(|b| b.heading_title.clone())
+                .unwrap_or_else(|| {
+                    let first_line = current_chunk_blocks[0].text.lines().next().unwrap_or("Untitled").trim();
+                    let clean = first_line.replace("#", "").trim().to_string();
+                    if clean.len() > 40 {
+                        format!("{}...", &clean[..40])
+                    } else {
+                        clean
+                    }
+                });
+            chunks.push(TopicChunk { text, suggested_title });
+        }
+
+        chunks
     }
 }
 
@@ -46,7 +137,6 @@ pub fn parse_raw_blocks(content: &str) -> Vec<RawBlock> {
                         current_block_text_accumulator.clear();
                     }
                 }
-                // Leaf events at depth 0
                 _ => {
                     let block_text = content[range.clone()].to_string();
                     if !block_text.trim().is_empty() {
@@ -60,7 +150,6 @@ pub fn parse_raw_blocks(content: &str) -> Vec<RawBlock> {
                 }
             }
         } else {
-            // Inside a block
             match &event {
                 Event::Start(_) => {
                     depth += 1;

@@ -1,17 +1,48 @@
 use rusqlite::Connection;
 use crate::error::AppError;
 use crate::domain::distribute::DraftDistributionPlan;
-use crate::domain::note::{NoteId, NewNote};
+use crate::domain::note::{NoteId, NewNote, IndexingStatus};
 
 pub fn apply_distribution(
     conn: &mut Connection,
     plan: DraftDistributionPlan,
-) -> Result<(), AppError> {
-    // Pre-serialize plan before consuming plan.chunks
+) -> Result<Vec<i64>, AppError> {
     let result_json = serde_json::to_string(&plan).unwrap_or_default();
+    
+    // Create a mutable copy of chunks to resolve "merge_with_chunk" decisions first
+    let mut chunks = plan.chunks.clone();
+    let mut resolved_any = true;
+    let mut iterations = 0;
+    while resolved_any && iterations < 100 {
+        resolved_any = false;
+        iterations += 1;
+        
+        for i in 0..chunks.len() {
+            if chunks[i].recommendation.action == "merge_with_chunk" {
+                if let Some(target_idx) = chunks[i].recommendation.merge_target_chunk_index {
+                    if target_idx < chunks.len() && target_idx != i {
+                        let text_to_append = chunks[i].text.clone();
+                        if !text_to_append.is_empty() {
+                            if chunks[target_idx].text.is_empty() {
+                                chunks[target_idx].text = text_to_append;
+                            } else {
+                                chunks[target_idx].text.push_str("\n\n");
+                                chunks[target_idx].text.push_str(&text_to_append);
+                            }
+                        }
+                        chunks[i].recommendation.action = "skip".to_string();
+                        chunks[i].text.clear();
+                        resolved_any = true;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut affected_note_ids = Vec::new();
 
     // 1. First apply all 'append' actions
-    for chunk in &plan.chunks {
+    for chunk in &chunks {
         if chunk.recommendation.action == "append" {
             if let Some(target_id) = chunk.recommendation.target_note_id {
                 let target_note = crate::db::repos::notes::get_by_id(conn, target_id)?
@@ -29,14 +60,17 @@ pub fn apply_distribution(
                 };
                 
                 crate::db::repos::notes::update_content_with_diff(conn, target_id, &new_content)?;
+                crate::db::repos::notes::set_status(conn, target_id, IndexingStatus::Pending)?;
+                affected_note_ids.push(target_id);
             }
         }
     }
 
     // 2. Insert new child notes resolving temporary negative parent IDs
     let mut inserted_notes = std::collections::HashMap::new();
-    let mut pending_creations: Vec<crate::domain::distribute::ChunkDistributionPlan> = plan.chunks.into_iter()
+    let mut pending_creations: Vec<crate::domain::distribute::ChunkDistributionPlan> = chunks.iter()
         .filter(|c| c.recommendation.action == "create_child")
+        .cloned()
         .collect();
 
     let mut progressed = true;
@@ -46,37 +80,48 @@ pub fn apply_distribution(
 
         for chunk in pending_creations {
             let parent_id_opt = chunk.recommendation.parent_note_id;
+            let parent_chunk_opt = chunk.recommendation.parent_chunk_index;
             
-            let can_insert = match parent_id_opt {
-                Some(pid) if pid < 0 => {
+            let can_insert = if let Some(parent_chunk_idx) = parent_chunk_opt {
+                inserted_notes.contains_key(&parent_chunk_idx)
+            } else if let Some(pid) = parent_id_opt {
+                if pid < 0 {
                     let parent_chunk_idx = (-pid - 1) as usize;
                     inserted_notes.contains_key(&parent_chunk_idx)
+                } else {
+                    true
                 }
-                _ => true,
+            } else {
+                true
             };
 
             if can_insert {
                 let title = chunk.recommendation.new_note_title.clone()
                     .unwrap_or_else(|| chunk.suggested_title.clone());
 
-                let parent_id = match parent_id_opt {
-                    Some(pid) if pid < 0 => {
-                        let parent_chunk_idx = (-pid - 1) as usize;
-                        inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
+                let parent_id = if let Some(parent_chunk_idx) = parent_chunk_opt {
+                    inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
+                } else {
+                    match parent_id_opt {
+                        Some(pid) if pid < 0 => {
+                            let parent_chunk_idx = (-pid - 1) as usize;
+                            inserted_notes.get(&parent_chunk_idx).map(|id| NoteId(*id))
+                        }
+                        Some(pid) => Some(NoteId(pid)),
+                        None => None,
                     }
-                    Some(pid) => Some(NoteId(pid)),
-                    None => None,
                 };
 
                 let new_note = NewNote {
                     title,
-                    content: chunk.text,
+                    content: chunk.text.clone(),
                     parent_note_id: parent_id,
                     is_draft: false,
                     ..Default::default()
                 };
                 let new_id = crate::db::repos::notes::insert(conn, &new_note)?;
                 inserted_notes.insert(chunk.chunk_index, new_id.0);
+                affected_note_ids.push(new_id.0);
                 progressed = true;
             } else {
                 next_pending.push(chunk);
@@ -93,16 +138,20 @@ pub fn apply_distribution(
 
         let new_note = NewNote {
             title,
-            content: chunk.text,
+            content: chunk.text.clone(),
             parent_note_id: None,
             is_draft: false,
             ..Default::default()
         };
-        crate::db::repos::notes::insert(conn, &new_note)?;
+        let new_id = crate::db::repos::notes::insert(conn, &new_note)?;
+        affected_note_ids.push(new_id.0);
     }
 
-    // Move original draft note to archive
-    crate::db::repos::notes::archive_note(conn, plan.draft_id)?;
+    // Only archive the draft note if none of the chunks were skipped.
+    let has_skipped = plan.chunks.iter().any(|c| c.recommendation.action == "skip");
+    if !has_skipped {
+        crate::db::repos::notes::archive_note(conn, plan.draft_id)?;
+    }
 
     // Log the applied distribution run using pre-serialized result_json
     let updated = conn.execute(
@@ -119,7 +168,7 @@ pub fn apply_distribution(
         )?;
     }
 
-    Ok(())
+    Ok(affected_note_ids)
 }
 
 #[cfg(test)]
@@ -166,6 +215,8 @@ mod tests {
                         target_note_id: Some(target_id.0),
                         new_note_title: None,
                         parent_note_id: None,
+                        parent_chunk_index: None,
+                        merge_target_chunk_index: None,
                         reason: "fits math".to_string(),
                     },
                 },
@@ -179,6 +230,8 @@ mod tests {
                         target_note_id: None,
                         new_note_title: Some("Calculus".to_string()),
                         parent_note_id: Some(target_id.0),
+                        parent_chunk_index: None,
+                        merge_target_chunk_index: None,
                         reason: "new topic under math".to_string(),
                     },
                 },
@@ -196,7 +249,7 @@ mod tests {
         let target_note = crate::db::repos::notes::get_by_id(&conn, target_id.0).unwrap().unwrap();
         assert!(target_note.content.starts_with("Initial math content\n\n<!-- imported from draft #"));
         assert!(target_note.content.ends_with("Chunk 1 to append"));
-        assert_eq!(target_note.indexing_status, crate::domain::note::IndexingStatus::Stale);
+        assert_eq!(target_note.indexing_status, crate::domain::note::IndexingStatus::Pending);
 
         let mut stmt = conn.prepare("SELECT note_id, title, content, parent_note_id, is_draft FROM notes WHERE parent_note_id = ?").unwrap();
         let mut rows = stmt.query([target_id.0]).unwrap();
