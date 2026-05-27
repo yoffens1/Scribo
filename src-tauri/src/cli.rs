@@ -7,6 +7,13 @@ pub mod fragment_file;
 pub mod distribute;
 
 fn get_db_path() -> PathBuf {
+    let mut path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    path.push("src-tauri");
+    path.push("scribo_core.db");
+    if path.exists() {
+        return path;
+    }
+    
     if let Some(mut path) = dirs::data_dir() {
         path.push("scribo");
         path.push("scribo_core.db");
