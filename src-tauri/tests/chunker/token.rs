@@ -1,4 +1,4 @@
-use scribo_lib::fragmenter::stages::token::*;
+use scribo_lib::fragmenter::token::*;
 
 #[test]
 fn test_count_tokens() {

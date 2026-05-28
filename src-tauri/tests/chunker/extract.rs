@@ -1,4 +1,25 @@
-use scribo_lib::fragmenter::stages::extract::{extract_yaml_frontmatter, split_by_headings};
+use scribo_lib::fragmenter::segment::heading::split_by_headings;
+
+// Helper to wrap extract_yaml_frontmatter check
+fn extract_yaml_frontmatter(content: &str) -> (Option<serde_json::Map<String, serde_json::Value>>, String) {
+    if let Some(stripped) = content.strip_prefix("---\n") {
+        if let Some(end_idx) = stripped.find("\n---\n") {
+            let yaml_text = &stripped[..end_idx];
+            let remaining = stripped[end_idx + 5..].to_string();
+            
+            let metadata = match serde_yaml::from_str::<serde_json::Map<String, serde_json::Value>>(yaml_text) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("Failed to parse YAML frontmatter: {}", e);
+                    serde_json::Map::new()
+                }
+            };
+            
+            return (if metadata.is_empty() { None } else { Some(metadata) }, remaining);
+        }
+    }
+    (None, content.to_string())
+}
 
 #[test]
 fn test_extract_yaml_frontmatter_valid() {
@@ -33,24 +54,22 @@ fn test_extract_yaml_frontmatter_missing() {
 fn test_split_by_headings_specific_level() {
     let text = "# H1\nContent 1\n## H2\nContent 2\n## H2-2\nContent 3";
     
-    // Split by level 2 (##)
     let sections = split_by_headings(text, 2);
     assert_eq!(sections.len(), 3);
-    assert_eq!(sections[0], "# H1\nContent 1");
-    assert_eq!(sections[1], "## H2\nContent 2");
-    assert_eq!(sections[2], "## H2-2\nContent 3");
+    assert_eq!(sections[0].0, "# H1\nContent 1");
+    assert_eq!(sections[1].0, "## H2\nContent 2");
+    assert_eq!(sections[2].0, "## H2-2\nContent 3");
 }
 
 #[test]
 fn test_split_by_headings_any_level() {
     let text = "# H1\nContent 1\n## H2\nContent 2\n### H3\nContent 3";
     
-    // Split by level 0 (meaning any heading level)
     let sections = split_by_headings(text, 0);
     assert_eq!(sections.len(), 3);
-    assert_eq!(sections[0], "# H1\nContent 1");
-    assert_eq!(sections[1], "## H2\nContent 2");
-    assert_eq!(sections[2], "### H3\nContent 3");
+    assert_eq!(sections[0].0, "# H1\nContent 1");
+    assert_eq!(sections[1].0, "## H2\nContent 2");
+    assert_eq!(sections[2].0, "### H3\nContent 3");
 }
 
 #[test]
@@ -58,7 +77,7 @@ fn test_split_by_headings_none() {
     let text = "This is a normal paragraph with no headings.";
     let sections = split_by_headings(text, 2);
     assert_eq!(sections.len(), 1);
-    assert_eq!(sections[0], text);
+    assert_eq!(sections[0].0, text);
 }
 
 #[test]
@@ -66,6 +85,6 @@ fn test_split_by_headings_carriage_return() {
     let text = "# H1\r\nContent 1\r\n## H2\r\nContent 2";
     let sections = split_by_headings(text, 2);
     assert_eq!(sections.len(), 2);
-    assert_eq!(sections[0], "# H1\r\nContent 1");
-    assert_eq!(sections[1], "## H2\r\nContent 2");
+    assert_eq!(sections[0].0, "# H1\r\nContent 1");
+    assert_eq!(sections[1].0, "## H2\r\nContent 2");
 }

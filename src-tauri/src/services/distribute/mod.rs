@@ -4,7 +4,7 @@ pub mod apply;
 pub mod refresh_cards;
 pub mod analyze;
 
-pub use crate::fragmenter::topic::{Chunker, RuleChunker, SemanticChunker, split_into_topics, parse_raw_blocks};
+pub use crate::fragmenter::{Chunker, RuleChunker, SemanticChunker};
 pub use classifier::{Classifier, HeuristicClassifier, apply_heuristic_linking};
 pub use retriever::{Retriever, VectorRetriever};
 pub use apply::apply_distribution;

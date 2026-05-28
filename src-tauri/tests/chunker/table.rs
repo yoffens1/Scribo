@@ -1,4 +1,4 @@
-use scribo_lib::fragmenter::markdown::table::*;
+use scribo_lib::fragmenter::clean::tables::{extract_tables, linearize_table};
 
 #[test]
 fn test_extract_tables_valid() {

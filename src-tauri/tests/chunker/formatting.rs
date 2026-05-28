@@ -1,4 +1,4 @@
-use scribo_lib::fragmenter::markdown::formatting::*;
+use scribo_lib::fragmenter::clean::transforms::*;
 
 #[test]
 fn test_remove_empty_lines() {

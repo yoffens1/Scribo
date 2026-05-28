@@ -132,7 +132,10 @@ impl LocalLlm {
             .with_embeddings(true);
         let mut ctx = self.model.new_context(backend, ctx_params).map_err(|e| e.to_string())?;
 
-        let tokens_list = self.model.str_to_token(text, AddBos::Always).map_err(|e| e.to_string())?;
+        let mut tokens_list = self.model.str_to_token(text, AddBos::Always).map_err(|e| e.to_string())?;
+        if tokens_list.len() > 512 {
+            tokens_list.truncate(512);
+        }
 
         let mut batch = LlamaBatch::new(tokens_list.len(), 1);
         let last_index = tokens_list.len() - 1;

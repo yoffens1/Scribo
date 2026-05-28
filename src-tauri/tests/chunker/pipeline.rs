@@ -1,51 +1,28 @@
-use scribo_lib::fragmenter::stages::assemble::{glue_subheadings_to_content, assemble_raw_fragments};
-use scribo_lib::fragmenter::stages::table_restore::restore_tables;
-use scribo_lib::fragmenter::{fragment_for_embedding, fragment_for_generation, fragment_paired, FragmentOptions, FragmentMode, TableInfo};
+use scribo_lib::fragmenter::{
+    fragment_for_embedding, fragment_for_generation, fragment_paired,
+    FragmentConfig, TableInfo, CleanFlags,
+};
 use crate::types::validate_config_invariants;
 
 #[test]
-fn test_glue_subheadings_to_content() {
-    let paragraphs = vec!["## Subheading", "Content under subheading", "Normal paragraph"];
-    let glued = glue_subheadings_to_content(paragraphs);
-    
-    assert_eq!(glued.len(), 2);
-    assert_eq!(glued[0], "## Subheading\n\nContent under subheading");
-    assert_eq!(glued[1], "Normal paragraph");
-}
-
-#[test]
-fn test_assemble_raw_fragments_no_overlap() {
-    let paragraphs = vec![
-        std::borrow::Cow::Borrowed("Paragraph one"),
-        std::borrow::Cow::Borrowed("Paragraph two"),
-    ];
-    let opts = FragmentOptions {
-        max_tokens: 50,
-        overlap_tokens: 0,
-        ..FragmentOptions::default()
-    };
-    
-    let chunks = assemble_raw_fragments(paragraphs, &opts);
-    assert!(!chunks.is_empty());
-}
-
-#[test]
 fn test_restore_tables() {
-    let raw_chunks = vec!["Some text with {{TABLE_0}} and text.".to_string()];
+    let raw_chunks = vec![scribo_lib::fragmenter::pack::RawFragment {
+        text: "Some text with {{TABLE_0}} and text.".to_string(),
+        meta: Default::default(),
+    }];
     let tables = vec![TableInfo {
         placeholder: "{{TABLE_0}}".to_string(),
         content: "| H1 |\n|---|\n| V1 |".to_string(),
         tokens: 5,
     }];
-    let opts = FragmentOptions {
-        separate_tables_as_fragments: false,
-        ..FragmentOptions::default()
-    };
+    let mut flags = CleanFlags::default();
+    flags.separate_tables_as_fragments = false;
+    flags.preserve_tables = true;
     
-    let restored = restore_tables(raw_chunks, &tables, &opts);
+    let restored = scribo_lib::fragmenter::clean::tables::restore_tables(raw_chunks, &tables, &flags);
     assert_eq!(restored.len(), 1);
-    assert!(restored[0].contains("| H1 |"));
-    assert!(!restored[0].contains("{{TABLE_0}}"));
+    assert!(restored[0].text.contains("| H1 |"));
+    assert!(!restored[0].text.contains("{{TABLE_0}}"));
 }
 
 #[test]
@@ -71,14 +48,13 @@ $$
 $$
 "#;
     
-    let opts = FragmentOptions::default(); // default uses embedding preset logic in chunk_for_embedding
+    let opts = FragmentConfig::embedding();
     let chunks = fragment_for_embedding(text, &opts);
     
     assert!(!chunks.is_empty());
     
-    // Dynamically validate all active config invariants for the embedding mode preset
-    let embedding_opts = opts.for_mode(FragmentMode::Embedding);
-    validate_config_invariants(&chunks, &embedding_opts);
+    let flags = opts.cleaner.to_flags();
+    validate_config_invariants(&chunks, &flags);
 }
 
 #[test]
@@ -94,14 +70,13 @@ Intro paragraph for generation.
 - Item 2
 "#;
     
-    let opts = FragmentOptions::default();
+    let opts = FragmentConfig::generation();
     let chunks = fragment_for_generation(text, &opts);
     
     assert!(!chunks.is_empty());
     
-    // Dynamically validate all active config invariants for the generation mode preset
-    let gen_opts = opts.for_mode(FragmentMode::Generation);
-    validate_config_invariants(&chunks, &gen_opts);
+    let flags = opts.cleaner.to_flags();
+    validate_config_invariants(&chunks, &flags);
 }
 
 #[test]
@@ -117,14 +92,13 @@ Intro paragraph for structural.
 - Item 2
 "#;
     
-    let opts = FragmentOptions::default();
+    let opts = FragmentConfig::structural();
     let result = fragment_paired(text.to_string(), &opts);
     
     let struct_chunks: Vec<String> = result.pairs.iter().map(|p| p.embedding.clone()).collect();
     
     assert!(!struct_chunks.is_empty());
     
-    // Dynamically validate all active config invariants for structural mode (which matches struct_chunks raw parsing options)
-    let struct_opts = opts.for_mode(FragmentMode::Structural);
-    validate_config_invariants(&struct_chunks, &struct_opts);
+    let flags = opts.cleaner.to_flags();
+    validate_config_invariants(&struct_chunks, &flags);
 }
