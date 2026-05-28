@@ -258,9 +258,22 @@ pub fn search(
 }
 
 /// Zero-copy cast from embedding `BLOB` bytes to `f32` slice.
-/// Requires the blob to have been stored as raw `f32` little-endian (no header).
-fn bytes_to_f32_slice(bytes: &[u8]) -> &[f32] {
-    bytemuck::cast_slice(bytes)
+/// Falls back to copy if the pointer is not aligned.
+fn bytes_to_f32_slice(bytes: &[u8]) -> std::borrow::Cow<'_, [f32]> {
+    let ptr = bytes.as_ptr() as usize;
+    if ptr % 4 == 0 {
+        std::borrow::Cow::Borrowed(bytemuck::cast_slice(bytes))
+    } else {
+        let mut aligned = vec![0.0f32; bytes.len() / 4];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                aligned.as_mut_ptr() as *mut u8,
+                bytes.len(),
+            );
+        }
+        std::borrow::Cow::Owned(aligned)
+    }
 }
 
 use crate::ai::cosine_similarity_normalized;
@@ -330,8 +343,14 @@ pub fn vector_search(
             let fragment_id: i64 = row.get(0)?;
             let blob_ref = row.get_ref(1)?;
             if let rusqlite::types::ValueRef::Blob(bytes) = blob_ref {
+                if bytes.is_empty() {
+                    continue;
+                }
                 let cand_vector = bytes_to_f32_slice(bytes);
-                let similarity = cosine_similarity_normalized(query_vector, cand_vector);
+                if cand_vector.len() != query_vector.len() {
+                    continue;
+                }
+                let similarity = cosine_similarity_normalized(query_vector.as_ref(), cand_vector.as_ref());
                 
                 top_hits.push(HitRecord { fragment_id, similarity });
                 if top_hits.len() > limit {

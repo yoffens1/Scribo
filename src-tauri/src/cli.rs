@@ -90,7 +90,11 @@ enum Commands {
         min_score: f32,
     },
     /// Re-calculate and update embeddings for all fragments in the database.
-    Reindex,
+    Reindex {
+        /// Reindex everything, even up-to-date notes.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Resolves the file path to the Scribo SQLite database.
@@ -213,8 +217,8 @@ pub fn handle_cli(args: Vec<String>) {
                 min_score,
             );
         }
-        Commands::Reindex => {
-            reindex::handle_reindex(&mut conn);
+        Commands::Reindex { force } => {
+            reindex::handle_reindex(&db_path, force);
         }
     }
 }

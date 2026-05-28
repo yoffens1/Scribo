@@ -129,6 +129,8 @@ impl LocalLlm {
         let backend = crate::ai::models::manager::get_backend()?;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(std::num::NonZeroU32::new(2048).unwrap()))
+            .with_n_batch(2048)
+            .with_n_ubatch(2048)
             .with_embeddings(true);
         let mut ctx = self.model.new_context(backend, ctx_params).map_err(|e| e.to_string())?;
 

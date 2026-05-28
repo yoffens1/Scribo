@@ -14,6 +14,7 @@
 //! | [`reviewer`]   | FSRS-driven spaced repetition scheduling and review logging |
 //! | [`import`]     | Bulk markdown-file import into the note store |
 //! | [`distribute`] | Draft-to-note distribution pipeline (chunk → retrieve → classify → apply) |
+//! | [`reindex`]    | Detects model drift and re-queues notes for vectorization |
 
 pub mod indexer;
 pub mod scheduler;
@@ -22,3 +23,4 @@ pub mod notesearch;
 pub mod reviewer;
 pub mod import;
 pub mod distribute;
+pub mod reindex;

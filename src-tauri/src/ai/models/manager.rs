@@ -80,4 +80,9 @@ impl ModelManager {
         let mut cache = self.active_models.write();
         cache.pop(id);
     }
+
+    pub fn clear(&self) {
+        let mut cache = self.active_models.write();
+        cache.clear();
+    }
 }

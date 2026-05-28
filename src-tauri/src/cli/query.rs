@@ -19,7 +19,7 @@ use crate::retrieval::types::{
 
 /// Builds a `DbState` whose pool already points at `db_path`,
 /// without going through the Tauri `db_initialize` command.
-fn make_state(db_path: &Path) -> Result<DbState, String> {
+pub fn make_state(db_path: &Path) -> Result<DbState, String> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -54,6 +54,19 @@ pub fn handle_query(
         Ok(s) => s,
         Err(e) => { eprintln!("Failed to open DB: {e}"); return; }
     };
+
+    const CURRENT_MODEL: &str = "granite-embedding-97M-multilingual-r2-BF16";
+    const CURRENT_DIM: i64 = 384;
+
+    if let Ok(report) = crate::services::reindex::find_stale_notes(&state, CURRENT_MODEL, CURRENT_DIM) {
+        if !report.stale_notes.is_empty() {
+            eprintln!(
+                "[query] WARNING: {} notes use a different embedding model. \
+                 Their vectors will be ignored. Run `reindex` to fix.",
+                report.stale_notes.len()
+            );
+        }
+    }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -169,4 +182,7 @@ pub fn handle_query(
             );
         }
     });
+
+    // Clean up active models to prevent llama_cpp backend destruction order panic/abort.
+    crate::ai::models::manager::get_model_manager().clear();
 }
