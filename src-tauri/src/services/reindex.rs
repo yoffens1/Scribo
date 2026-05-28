@@ -67,7 +67,7 @@ pub fn mark_stale_for_model_change(
 
     for (note_id, _, _) in &report.stale_notes {
         tx.execute(
-            "UPDATE chunks SET embedding_needs_update = 1, embedding = NULL
+            "UPDATE chunks SET embedding = NULL
              WHERE note_id = ?1",
             params![note_id],
         ).map_err(|e| e.to_string())?;

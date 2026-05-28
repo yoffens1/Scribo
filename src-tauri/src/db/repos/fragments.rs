@@ -360,8 +360,7 @@ pub fn vector_search(
         }
     }
 
-    let mut hits: Vec<HitRecord> = top_hits.into_sorted_vec();
-    hits.reverse();
+    let hits: Vec<HitRecord> = top_hits.into_sorted_vec();
 
     if hits.is_empty() {
         return Ok(Vec::new());

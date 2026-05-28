@@ -82,12 +82,14 @@ pub fn handle_reindex(db_path: &Path, force: bool) {
                         let bytes = bytemuck::cast_slice::<f32, u8>(&vec).to_vec();
                         let pool_guard = state.pool.read();
                         let conn = pool_guard.as_ref().unwrap().get().unwrap();
-                        let _ = conn.execute(
+                        if let Err(e) = conn.execute(
                             "UPDATE chunks
-                             SET embedding = ?1, embedding_needs_update = 0
+                             SET embedding = ?1
                              WHERE chunk_id = ?2",
                             rusqlite::params![bytes, chunk_id],
-                        );
+                        ) {
+                            eprintln!("Failed to update chunk {chunk_id} embedding in DB: {e}");
+                        }
                     }
                     Err(e) => eprintln!("embed failed for chunk {chunk_id}: {e}"),
                 }
