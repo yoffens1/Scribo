@@ -1,16 +1,16 @@
-//! # Note Search Service
+//! # Search Service
 //!
-//! Fuzzy note-title search backed by the `skim` fuzzy-matcher algorithm.
-//!
-//! This is intentionally **not** a full-text search — it operates on the list of note
-//! file paths / titles provided by the caller (typically the frontend's in-memory list).
-//! It is used for quick note-picker interactions, not knowledge retrieval.
-//!
-//! For semantic retrieval over fragment content, see [`crate::retrieval`].
+//! Provides two main search mechanisms:
+//! 1. In-memory fuzzy note-title matching backed by the `skim` fuzzy-matcher algorithm.
+//! 2. Semantic hybrid retrieval (FTS5 + vector + RRF) orchestrating the lower-level retrieval engine.
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use serde::{Deserialize, Serialize};
+
+use crate::retrieval::{retrieve, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions};
+use crate::error::AppError;
+use crate::db::DbState;
 
 /// A single fuzzy search result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,4 +59,20 @@ impl FuzzySearch {
         results.truncate(limit);
         results
     }
+}
+
+/// Orchestrates semantic retrieval for a query using the lower-level retrieval engine.
+pub async fn run_retrieval_query(
+    query: String,
+    query_embedding: Option<Vec<f32>>,
+    config: RetrievalConfig,
+    options: Option<RetrieveOptions>,
+    state: &DbState,
+) -> Result<Vec<RetSearchResult>, AppError> {
+    let opts = options.unwrap_or(RetrieveOptions {
+        top_k: None,
+        filters: None,
+        target_level: None,
+    });
+    retrieve(state, &query, query_embedding.as_deref(), &config, &opts).await
 }

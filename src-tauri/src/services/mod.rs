@@ -10,7 +10,7 @@
 //! | [`indexer`]    | Fragment extraction, deduplication, and persistence into the `chunks` table |
 //! | [`scheduler`]  | Background async queue for triggering re-indexing of changed notes |
 //! | [`validation`] | Pre-flight checks to determine whether a note needs re-indexing |
-//! | [`notesearch`] | Fuzzy note-title search backed by `skim` |
+//! | [`search`]     | Fuzzy note-title search and semantic search orchestration |
 //! | [`reviewer`]   | FSRS-driven spaced repetition scheduling and review logging |
 //! | [`import`]     | Bulk markdown-file import into the note store |
 //! | [`distribute`] | Draft-to-note distribution pipeline (chunk → retrieve → classify → apply) |
@@ -19,7 +19,7 @@
 pub mod indexer;
 pub mod scheduler;
 pub mod validation;
-pub mod notesearch;
+pub mod search;
 pub mod reviewer;
 pub mod import;
 pub mod distribute;

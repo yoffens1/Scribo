@@ -29,7 +29,7 @@ use crate::retrieval::fusion::rrf;
 use crate::retrieval::stages::{
     hyde::run_hyde,
     synonyms::{expand_static, expand_llm},
-    translation::run_translation,
+    translate_query::run_translation,
 };
 use crate::retrieval::rerankers::{
     listwise::rerank_listwise,

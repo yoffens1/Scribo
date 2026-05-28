@@ -1,4 +1,4 @@
-//! # Translation Stage
+//! # Translate Query Stage
 //!
 //! Translates the user's query into the vault's dominant language when they differ.
 //! This is important for multilingual vaults where notes are stored in language A

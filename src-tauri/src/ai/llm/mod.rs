@@ -20,6 +20,10 @@ impl LlmService {
         Self { client: Client::new(), config, app }
     }
 
+    pub fn config(&self) -> &LlmConfig {
+        &self.config
+    }
+
     fn provider_for(p: Provider) -> Box<dyn LlmProvider> {
         match p {
             Provider::OpenAi    => Box::new(openai::OpenAiProvider),

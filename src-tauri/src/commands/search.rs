@@ -2,9 +2,9 @@
 //!
 //! Tauri commands for semantic search (RAG), fuzzy string search, and related utilities.
 
-use crate::services::notesearch::{FuzzySearch, SearchHit};
+use crate::services::search::{FuzzySearch, SearchHit, run_retrieval_query};
 use crate::ai::{LlmConfig, LlmService, Translator};
-use crate::retrieval::{detect_language, is_english, retrieve, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
+use crate::retrieval::{detect_language, is_english, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
 use crate::error::AppError;
 use crate::db::DbState;
 use tauri::State;
@@ -20,12 +20,7 @@ pub async fn retrieval_query(
     options: Option<RetrieveOptions>,
     state: State<'_, DbState>,
 ) -> Result<Vec<RetSearchResult>, AppError> {
-    let opts = options.unwrap_or(RetrieveOptions {
-        top_k: None,
-        filters: None,
-        target_level: None,
-    });
-    retrieve(&state, &query, query_embedding.as_deref(), &config, &opts).await
+    run_retrieval_query(query, query_embedding, config, options, &state).await
 }
 
 /// Simple trigram-based fuzzy string matcher.
@@ -36,8 +31,6 @@ pub async fn notesearch_fuzzy(
     notes: Vec<String>,
     limit: usize,
 ) -> Result<Vec<SearchHit>, AppError> {
-    // Note: instantiating FuzzySearch on every request might be slightly slow if `notes` is huge,
-    // but for now this perfectly matches the TS implementation.
     let search = FuzzySearch::new(notes);
     let results = search.search(&query, limit);
     Ok(results)

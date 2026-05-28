@@ -28,19 +28,19 @@
 //!
 //! - [`analyze`]        — orchestrates chunking + retrieval + LLM batch recommendation.
 //! - [`classifier`]     — heuristic post-processing to infer parent-child links between new notes.
-//! - [`retriever`]      — embeds each chunk and finds candidate target notes via vector search.
+//! - [`candidate_search`] — embeds each chunk and finds candidate target notes via vector search.
 //! - [`apply`]          — commits the approved `DraftDistributionPlan` to the database.
 //! - [`refresh_cards`]  — regenerates stale SRS cards for notes modified by distribution.
 
 pub mod classifier;
-pub mod retriever;
+pub mod candidate_search;
 pub mod apply;
 pub mod refresh_cards;
 pub mod analyze;
 
 pub use crate::fragmenter::{Chunker, RuleChunker, SemanticChunker};
 pub use classifier::{Classifier, HeuristicClassifier, apply_heuristic_linking};
-pub use retriever::{Retriever, VectorRetriever};
+pub use candidate_search::{Retriever, VectorRetriever};
 pub use apply::apply_distribution;
 pub use refresh_cards::refresh_stale_cards_for_notes;
 pub use analyze::analyze_draft_for_distribution;
