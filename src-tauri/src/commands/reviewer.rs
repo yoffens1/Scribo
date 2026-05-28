@@ -1,8 +1,14 @@
+//! # Reviewer Commands
+//!
+//! Tauri commands for the Flashcard Spaced Repetition System (FSRS).
+//! Interfaces with the stateless `ReviewerService` stored in `DbState`.
+
 use tauri::State;
 use crate::db::DbState;
 use crate::domain::{Rating, Schedule, ScheduleId};
 use crate::services::reviewer::ReviewResult;
 
+/// Retrieves the next `limit` flashcards/notes that are due for review.
 #[tauri::command]
 pub async fn reviewer_get_due(
     state: State<'_, DbState>,
@@ -13,6 +19,8 @@ pub async fn reviewer_get_due(
     }).map_err(|e| e.to_string())
 }
 
+/// Submits a rating (Again=1, Hard=2, Good=3, Easy=4) for a schedule.
+/// Computes the new FSRS stability/difficulty and schedules the next review date.
 #[tauri::command]
 pub async fn reviewer_rate(
     state: State<'_, DbState>,
@@ -25,6 +33,7 @@ pub async fn reviewer_rate(
     }).map_err(|e| e.to_string())
 }
 
+/// Manually overrides a note's review schedule to force it to appear in `days`.
 #[tauri::command]
 pub async fn reviewer_schedule_note_in_days(
     state: State<'_, DbState>,
@@ -36,6 +45,7 @@ pub async fn reviewer_schedule_note_in_days(
     }).map_err(|e| e.to_string())
 }
 
+/// Fetches a specific card by ID and formats its custom front/back/cloze into a `RenderedCard`.
 #[tauri::command]
 pub async fn reviewer_get_card(
     state: State<'_, DbState>,
@@ -61,6 +71,8 @@ pub async fn reviewer_get_card(
     }).map_err(|e: crate::AppError| e.to_string())
 }
 
+/// Automatically upgrades a basic heading-type card to a Q&A card.
+/// Uses the LLM to generate an active recall question based on the section's raw text.
 #[tauri::command]
 pub async fn reviewer_upgrade_card_front_with_ai(
     app: tauri::AppHandle,
@@ -127,6 +139,8 @@ pub async fn reviewer_upgrade_card_front_with_ai(
     Ok(generated_question)
 }
 
+/// Returns a grouped count of due cards aggregated up the note hierarchy.
+/// Used to display notification badges on folders/notes in the sidebar.
 #[tauri::command]
 pub async fn reviewer_get_hierarchical_due_counts(
     state: State<'_, DbState>,
@@ -136,6 +150,8 @@ pub async fn reviewer_get_hierarchical_due_counts(
     }).map_err(|e| e.to_string())
 }
 
+/// Returns a tree structure matching the vault directory tree, filtered to show
+/// only notes/folders that contain at least one due card.
 #[tauri::command]
 pub async fn reviewer_get_repeat_mode_tree(
     state: State<'_, DbState>,

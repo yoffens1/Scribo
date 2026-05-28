@@ -1,4 +1,4 @@
-use scribo_lib::fragmenter::clean::transforms::{format_latex, remove_latex};
+use scribo_lib::fragmenter::clean::latex::{format_latex, remove_latex};
 
 #[test]
 fn test_format_latex_symbols() {

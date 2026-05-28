@@ -147,23 +147,36 @@ impl Rating {
     }
 }
 
+/// A spaced repetition state record for a target entity (Card or Note).
+/// Holds the current FSRS parameters and the next scheduled review date.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schedule {
+    /// Unique identifier for this schedule.
     pub id: ScheduleId,
+    /// Polymorphic reference to the target (Card or Note) being scheduled.
     pub target: ReviewTarget,
 
+    /// The FSRS state of this schedule (New, Learning, Review, Relearning).
     pub state: SchedulerState,
+    /// FSRS stability parameter (representing retention rate half-life).
     pub stability: f64,
+    /// FSRS difficulty parameter (representing cognitive load, 1 to 10).
     pub difficulty: f64,
+    /// Total number of review repetitions.
     pub reps: i64,
+    /// Total number of review failures (lapses).
     pub lapses: i64,
 
+    /// Timestamp of the last review session, if any.
     pub last_reviewed: Option<Timestamp>,
+    /// Scheduled timestamp for the next due review.
     pub next_review: Option<Timestamp>,
 }
 
+/// Payload for creating a new Schedule.
 #[derive(Debug, Clone)]
 pub struct NewSchedule {
+    /// Target entity to schedule.
     pub target: ReviewTarget,
     /// When this item should first appear in the review queue.
     /// `None` = immediately (treated as "due now").
@@ -174,9 +187,13 @@ pub struct NewSchedule {
 /// parameter optimization (re-fitting weights against the user's history).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewLog {
+    /// Unique identifier for this log entry.
     pub log_id: i64,
+    /// Reference to the associated schedule record.
     pub schedule_id: ScheduleId,
+    /// Rating given by the user in this review session.
     pub rating: Rating,
+    /// Timestamp when the review took place.
     pub reviewed_at: Timestamp,
     /// Snapshot of stability BEFORE this review.
     pub prev_stability: Option<f64>,
@@ -186,22 +203,36 @@ pub struct ReviewLog {
     pub elapsed_days: Option<i64>,
 }
 
+/// Aggregated count of how many due items exist within a specific note.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteDueCount {
+    /// Identifier of the note.
     pub note_id: i64,
+    /// Number of due scheduled items.
     pub due_count: i64,
 }
 
+/// A node in the hierarchical review tree. Represents a note/folder and aggregates 
+/// its own due count along with the total due count of its subtree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepeatModeNode {
+    /// Identifier of the note/folder.
     pub note_id: i64,
+    /// Title of the note/folder.
     pub title: String,
+    /// Optional parent note identifier.
     pub parent_note_id: Option<i64>,
+    /// Materialized hierarchical path.
     pub path_cached: String,
+    /// Depth level in the notes tree.
     pub depth: i64,
+    /// Number of due items belonging directly to this note.
     pub own_due: i64,
+    /// Total items belonging directly to this note.
     pub own_total: i64,
+    /// Cumulative number of due items in the entire subtree under this note.
     pub subtree_due: i64,
+    /// Cumulative total number of items in the entire subtree under this note.
     pub subtree_total: i64,
 }
 

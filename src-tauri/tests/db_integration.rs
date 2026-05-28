@@ -20,6 +20,8 @@ mod tests {
         DbState {
             pool: pool_arc,
             reviewer,
+            cached_vault_lang: std::sync::Arc::new(RwLock::new(None)),
+            llm_service: std::sync::Arc::new(RwLock::new(None)),
             write_lock: Mutex::new(()),
         }
     }
@@ -145,12 +147,14 @@ mod tests {
 
         // 2. Test Retrieve (Keyword mode)
         let config = RetrievalConfig {
-            mode: "keyword".to_string(),
+            mode: scribo_lib::retrieval::types::RetrievalMode::Keyword,
             embedding_weight: None,
             pipeline: None,
             ai_rerank: None,
             vault_lang: Some("en".to_string()),
             llm_config: None,
+            adaptive_weights: None,
+            tuning: None,
         };
         let options = RetrieveOptions {
             top_k: Some(1),
@@ -275,6 +279,8 @@ mod tests {
         let db_state = DbState {
             pool: pool_arc,
             reviewer,
+            cached_vault_lang: std::sync::Arc::new(RwLock::new(None)),
+            llm_service: std::sync::Arc::new(RwLock::new(None)),
             write_lock: Mutex::new(()),
         };
 

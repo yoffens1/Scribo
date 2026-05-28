@@ -1,7 +1,12 @@
+//! # Console Logging Sink
+//!
+//! Outputs namespaced log events directly to standard output or standard error depending on severity.
+
 use crate::logging::types::{Sink, LogEvent, Trace, LogLevel};
 use std::pin::Pin;
 use std::future::Future;
 
+/// Sink that writes formatted logs directly to the standard terminal stream.
 pub struct ConsoleSink;
 
 impl Sink for ConsoleSink {

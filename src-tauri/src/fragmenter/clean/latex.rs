@@ -1,6 +1,6 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::borrow::Cow;
 use regex::Regex;
 
 static SYMBOL_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
@@ -65,6 +65,13 @@ static RE_FRAC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\frac\{([^}]+)\
 static RE_BRACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[{}]").unwrap());
 static RE_UNKNOWN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\[a-zA-Z]+").unwrap());
 
+fn chain<'a>(text: Cow<'a, str>, re: &Regex, rep: &str) -> Cow<'a, str> {
+    match re.replace_all(&text, rep) {
+        Cow::Owned(s) => Cow::Owned(s),
+        Cow::Borrowed(_) => text,
+    }
+}
+
 pub fn format_latex(text: &str) -> Cow<'_, str> {
     let text1 = RE_LATEX_BLOCK.replace_all(text, |caps: &regex::Captures| {
         format!("$${}$$", transform_math(&caps[1]))
@@ -87,27 +94,29 @@ fn transform_math(s: &str) -> String {
         cleaned = Cow::Owned(new_s);
     }
 
-    if let Cow::Owned(new_s) = RE_SUM_SUB_SUP.replace_all(&cleaned, "∑_{$1}^{$2}") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_SUM_SUB.replace_all(&cleaned, "∑_{$1}") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_SUM_SUP.replace_all(&cleaned, "∑^{$1}") { cleaned = Cow::Owned(new_s); }
+    cleaned = chain(cleaned, &RE_SUM_SUB_SUP, "∑_{$1}^{$2}");
+    cleaned = chain(cleaned, &RE_SUM_SUB, "∑_{$1}");
+    cleaned = chain(cleaned, &RE_SUM_SUP, "∑^{$1}");
     
-    if let Cow::Owned(new_s) = RE_PROD_SUB_SUP.replace_all(&cleaned, "∏_{$1}^{$2}") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_PROD_SUB.replace_all(&cleaned, "∏_{$1}") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_PROD_SUP.replace_all(&cleaned, "∏^{$1}") { cleaned = Cow::Owned(new_s); }
+    cleaned = chain(cleaned, &RE_PROD_SUB_SUP, "∏_{$1}^{$2}");
+    cleaned = chain(cleaned, &RE_PROD_SUB, "∏_{$1}");
+    cleaned = chain(cleaned, &RE_PROD_SUP, "∏^{$1}");
 
-    if let Cow::Owned(new_s) = RE_VEC.replace_all(&cleaned, "$1⃗") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_HAT.replace_all(&cleaned, "$1̂") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_TILDE.replace_all(&cleaned, "$1̃") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_BAR.replace_all(&cleaned, "$1̅") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_FRAC.replace_all(&cleaned, "($1)/($2)") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_BRACES.replace_all(&cleaned, "") { cleaned = Cow::Owned(new_s); }
-    if let Cow::Owned(new_s) = RE_UNKNOWN.replace_all(&cleaned, "") { cleaned = Cow::Owned(new_s); }
+    cleaned = chain(cleaned, &RE_VEC, "$1⃗");
+    cleaned = chain(cleaned, &RE_HAT, "$1̂");
+    cleaned = chain(cleaned, &RE_TILDE, "$1̃");
+    cleaned = chain(cleaned, &RE_BAR, "$1̅");
+    cleaned = chain(cleaned, &RE_FRAC, "($1)/($2)");
+    cleaned = chain(cleaned, &RE_BRACES, "");
+    cleaned = chain(cleaned, &RE_UNKNOWN, "");
 
     cleaned.into_owned()
 }
 
 pub fn remove_latex(text: &str) -> Cow<'_, str> {
     let mut cleaned = RE_LATEX_BLOCK.replace_all(text, "");
-    if let Cow::Owned(s) = RE_LATEX_INLINE.replace_all(&cleaned, "") { cleaned = Cow::Owned(s); }
+    if let Cow::Owned(s) = RE_LATEX_INLINE.replace_all(&cleaned, "") {
+        cleaned = Cow::Owned(s);
+    }
     cleaned
 }

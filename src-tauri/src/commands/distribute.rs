@@ -1,3 +1,9 @@
+//! # Distribute Commands
+//!
+//! Tauri commands orchestrating the "Distribute Draft" pipeline.
+//! This pipeline takes an inbox draft, uses an LLM to find related parent notes,
+//! breaks the draft into logical sections, and moves those sections into the parent notes.
+
 use crate::DbState;
 use crate::error::AppError;
 use crate::ai::{LlmConfig, LlmService};
@@ -5,6 +11,8 @@ use crate::domain::distribute::DraftDistributionPlan;
 use crate::services::distribute::{analyze_draft_for_distribution, apply_distribution};
 use std::sync::Arc;
 
+/// Phase 1: Analyze a draft and generate a distribution plan.
+/// Uses the LLM to map draft fragments to existing active notes. Does NOT modify the database.
 #[tauri::command]
 pub async fn distribute_analyze_draft(
     state: tauri::State<'_, DbState>,
@@ -15,6 +23,8 @@ pub async fn distribute_analyze_draft(
     analyze_draft_for_distribution(&state, draft_id, &llm_service).await
 }
 
+/// Mean-pools fragment embeddings (`level = 1`) into section embeddings (`level = 0`).
+/// Called during Phase 2 after new fragments have been embedded.
 pub fn compute_and_save_section_embeddings(conn: &rusqlite::Connection, note_id: i64) -> Result<(), AppError> {
     let mut stmt = conn.prepare(
         "SELECT chunk_id FROM chunks WHERE note_id = ? AND level = 0"
@@ -62,6 +72,11 @@ pub fn compute_and_save_section_embeddings(conn: &rusqlite::Connection, note_id:
     Ok(())
 }
 
+/// Phase 2: Execute an approved distribution plan.
+/// 1. Inserts content into target notes and deletes the original draft.
+/// 2. Re-indexes the affected target notes (generating chunks).
+/// 3. Computes LLM embeddings for new fragments (checking the cache first).
+/// 4. Generates SRS cards for the new sections via the Reviewer service.
 #[tauri::command]
 pub async fn distribute_apply_plan(
     app: tauri::AppHandle,

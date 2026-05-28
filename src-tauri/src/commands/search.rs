@@ -1,3 +1,7 @@
+//! # Search Commands
+//!
+//! Tauri commands for semantic search (RAG), fuzzy string search, and related utilities.
+
 use crate::services::notesearch::{FuzzySearch, SearchHit};
 use crate::ai::{LlmConfig, LlmService, Translator};
 use crate::retrieval::{detect_language, is_english, retrieve, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
@@ -6,6 +10,8 @@ use crate::db::DbState;
 use tauri::State;
 use std::sync::Arc;
 
+/// Runs the semantic retrieval pipeline. Supports vector search, FTS5 keyword search,
+/// HyDE (Hypothetical Document Embeddings), and LLM-based reranking.
 #[tauri::command]
 pub async fn retrieval_query(
     query: String,
@@ -22,6 +28,8 @@ pub async fn retrieval_query(
     retrieve(&state, &query, query_embedding.as_deref(), &config, &opts).await
 }
 
+/// Simple trigram-based fuzzy string matcher.
+/// Used by the frontend for fast in-memory note title filtering.
 #[tauri::command]
 pub async fn notesearch_fuzzy(
     query: String,
@@ -35,6 +43,7 @@ pub async fn notesearch_fuzzy(
     Ok(results)
 }
 
+/// Uses the LLM to translate a block of text into `target_lang`.
 #[tauri::command]
 pub async fn translation_translate(
     text: String,
@@ -46,16 +55,20 @@ pub async fn translation_translate(
     translator.translate(&text, &target_lang).await.map_err(|e| AppError::Other(e))
 }
 
+/// Uses `whatlang` to detect the ISO-639-1 language code of a string.
 #[tauri::command]
 pub fn retrieval_detect_language(text: String) -> Result<Option<String>, AppError> {
     Ok(detect_language(&text))
 }
 
+/// Fast check if text is predominantly English (used to skip translation steps).
 #[tauri::command]
 pub fn retrieval_is_english(text: String) -> Result<bool, AppError> {
     Ok(is_english(&text))
 }
 
+/// Resolves a pre-computed batch of search results into full fragment payloads.
+/// Used for paginated loading of RAG contexts.
 #[tauri::command]
 pub async fn retrieval_fetch(
     query: FetchQuery,

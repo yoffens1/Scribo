@@ -24,11 +24,16 @@ impl std::fmt::Display for NoteId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IndexingStatus {
-    Pending,    // создана, ждёт индексации
-    Indexing,   // в процессе
-    Indexed,    // готова к поиску/повторению
-    Failed,     // упало с ошибкой
-    Stale,      // контент изменился, нужна переиндексация
+    /// Newly created, waiting to be indexed.
+    Pending,
+    /// Currently being processed (chunking or embedding).
+    Indexing,
+    /// Successfully indexed and available for search/retrieval.
+    Indexed,
+    /// Indexing failed with an error.
+    Failed,
+    /// Note content has changed, needs re-indexing.
+    Stale,
 }
 
 impl IndexingStatus {
@@ -67,13 +72,18 @@ impl std::str::FromStr for IndexingStatus {
     }
 }
 
+/// The lifecycle status of a Note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NoteLifecycle {
-    Draft,       // в работе, не индексируется
-    Active,      // нормальная нота
-    Archived,    // спрятана, не индексируется, но видна в архиве
-    Deleted,     // soft delete, для sync, физически уйдёт через GC
+    /// Work-in-progress draft, not indexed.
+    Draft,
+    /// Regular note.
+    Active,
+    /// Archived note, hidden from normal views and not indexed.
+    Archived,
+    /// Soft-deleted note, retained for synchronization, removed by GC.
+    Deleted,
 }
 
 impl NoteLifecycle {
@@ -110,40 +120,62 @@ impl std::str::FromStr for NoteLifecycle {
     }
 }
 
-/// Заметка — единица знания. БД — единственный источник истины.
+/// A Note represents a user-authored document and is the core unit of knowledge.
+/// The database is the single source of truth for all note content and state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
+    /// Unique identifier for the note.
     pub id: NoteId,
 
-    // Контент — то что видит и редактирует юзер.
+    // Content: what the user sees and edits.
+    /// Title of the note.
     pub title: String,
-    pub content: String,           // raw markdown
-    pub content_hash: String,      // blake3 от нормализованного content
+    /// Raw markdown content of the note.
+    pub content: String,
+    /// BLAKE3 hash of the normalized note content, used for change detection.
+    pub content_hash: String,
 
-    // Иерархия
+    // Hierarchy
+    /// Optional parent note id to support hierarchical folder-like structures.
     pub parent_note_id: Option<NoteId>,
+    /// Materialized/cached path from the root note down to this note.
     pub path_cached: String,
+    /// Order for sorting siblings at the same hierarchical level.
     pub sort_order: i64,
+    /// Optional icon name/emoji for sidebar/UI rendering.
     pub icon: Option<String>,
 
-    // Состояние индексирования (для search и cards).
+    // Indexing status (for search, RAG, and SRS card generation).
+    /// Current background indexing status.
     pub indexing_status: IndexingStatus,
+    /// Description of the indexing error, if status is Failed.
     pub indexing_error: Option<String>,
+    /// Time when the note was last successfully indexed.
     pub indexed_at: Option<Timestamp>,
+    /// Name of the model used to generate embeddings.
     pub embedding_model: Option<String>,
+    /// Vector dimensions of the generated embeddings.
     pub embedding_dimension: Option<i64>,
+    /// Version of the indexing pipeline schema/logic.
     pub indexing_version: Option<String>,
 
-    // Жизненный цикл.
+    // Lifecycle
+    /// Current state in the note lifecycle.
     pub lifecycle: NoteLifecycle,
+    /// Whether the note is pinned at the top of lists.
     pub is_pinned: bool,
+    /// Whether the note is marked as a user favorite.
     pub is_favorite: bool,
 
-    // Обучение
+    // Study metadata
+    /// Overall mastery level (e.g. calculated from SRS card performance).
     pub mastery: Option<f32>,
+    /// When the note or its child cards were last reviewed.
     pub last_studied: Option<Timestamp>,
 
+    /// Creation timestamp in UTC seconds.
     pub created_at: Timestamp,
+    /// Last update timestamp in UTC seconds.
     pub updated_at: Timestamp,
 }
 
@@ -197,17 +229,17 @@ impl Note {
         self.updated_at = updated_at;
     }
 
-    /// Заметка участвует в search/RAG/card-generation.
+    /// Returns true if the note is eligible to be processed by the search, RAG, and card-generation pipelines.
     pub fn is_indexable(&self) -> bool {
         self.lifecycle == NoteLifecycle::Active
     }
 
-    /// Заметка видна в дереве repeat-mode.
+    /// Returns true if the note should be displayed in the SRS/repeat-mode study tree.
     pub fn is_visible_in_tree(&self) -> bool {
         self.lifecycle != NoteLifecycle::Deleted && self.lifecycle != NoteLifecycle::Draft
     }
 
-    /// Заметка — кандидат на distribute (черновик в работе).
+    /// Returns true if the note is a work-in-progress draft that can be distributed to other notes.
     pub fn is_distributable(&self) -> bool {
         self.lifecycle == NoteLifecycle::Draft
     }

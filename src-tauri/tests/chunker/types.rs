@@ -1,4 +1,4 @@
-use scribo_lib::fragmenter::{FragmentConfig, CleanFlags, Segmenter, Packer};
+use scribo_lib::fragmenter::{FragmentConfig, CleanFlags, Segmenter, Packer, LatexHandling};
 
 #[test]
 fn test_default_config() {
@@ -7,7 +7,7 @@ fn test_default_config() {
     assert!(flags.lower_case);
     assert!(flags.remove_links);
     assert!(flags.remove_formatting);
-    assert!(flags.format_latex);
+    assert_eq!(flags.latex, LatexHandling::Format);
     assert!(flags.remove_rules);
     assert!(flags.remove_numbering);
     assert!(flags.strip_heading_markers);
@@ -46,7 +46,7 @@ fn test_preset_embedding() {
     assert!(flags.lower_case);
     assert!(flags.remove_links);
     assert!(flags.remove_formatting);
-    assert!(flags.format_latex);
+    assert_eq!(flags.latex, LatexHandling::Format);
     assert!(flags.linearize_tables);
     assert!(flags.separate_tables_as_fragments);
     assert!(flags.remove_rules);
@@ -63,7 +63,7 @@ fn test_preset_embedding() {
             assert!(separate_sub_headings);
         }
         _ => panic!("Expected HeadingSections segmenter"),
-    }
+     }
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_preset_generation() {
     assert!(flags.lower_case);
     assert!(flags.remove_links);
     assert!(flags.remove_formatting);
-    assert!(!flags.format_latex);
+    assert_eq!(flags.latex, LatexHandling::Keep);
     assert!(flags.remove_rules);
     assert!(flags.compact_lines);
     assert!(flags.remove_numbering);
@@ -109,7 +109,7 @@ fn test_preset_structural() {
     assert!(!flags.lower_case);
     assert!(!flags.remove_links);
     assert!(!flags.remove_formatting);
-    assert!(!flags.format_latex);
+    assert_eq!(flags.latex, LatexHandling::Keep);
     assert!(!flags.remove_rules);
     assert!(!flags.remove_numbering);
     assert!(!flags.strip_heading_markers);

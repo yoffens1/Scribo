@@ -1,7 +1,22 @@
+//! # Notes Repository
+//!
+//! CRUD operations for the `notes` table — the root domain entity of Scribo.
+//!
+//! ## Key design choices
+//!
+//! - **Soft delete first**: `soft_delete` sets `lifecycle = 'deleted'`; `hard_delete` removes the row.
+//! - **`path_cached`**: a denormalised slash-separated path string (e.g. `"Math/Calculus/Limits"`)
+//!   stored alongside `parent_note_id` for fast tree queries. Updated recursively on rename/move.
+//! - **`indexing_status`**: state machine (`pending → indexing → indexed → stale → failed`).
+//!   The scheduler reads this column to find notes that need re-indexing.
+//! - **`update_content_with_diff`**: writes a `diffy` unified-diff patch to `note_revisions`
+//!   before updating the note, providing a full edit history.
+
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::AppError;
 use crate::domain::note::{Note, NoteId, IndexingStatus, NoteLifecycle};
 
+/// Lightweight projection used by `get_all` — avoids loading `content` and `embedding` blobs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NoteListItem {
     pub note_id: NoteId,
@@ -11,6 +26,7 @@ pub struct NoteListItem {
     pub indexing_version: Option<String>,
 }
 
+/// Maps a `rusqlite::Row` to a [`Note`]. Column indices must match [`SELECT_NOTE_COLUMNS`].
 fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
     let parent_note_id: Option<i64> = row.get(4)?;
     let status_str: String = row.get(8)?;
@@ -40,7 +56,9 @@ fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
     })
 }
 
-const SELECT_NOTE_COLUMNS: &str = 
+/// Canonical column list for SELECT queries returning a full [`Note`].
+/// The column order must be kept in sync with [`row_to_note`].
+const SELECT_NOTE_COLUMNS: &str =
     "SELECT note_id, title, content, content_hash, 
             parent_note_id, path_cached, sort_order, icon,
             indexing_status, indexing_error, indexed_at, embedding_model, embedding_dimension, 
@@ -55,6 +73,8 @@ pub fn get_by_id(conn: &Connection, note_id: i64) -> Result<Option<Note>, AppErr
     Ok(record)
 }
 
+/// Computes the `path_cached` value for a note given its parent.
+/// Returns `"Parent/Title"` if a parent exists, or just `"Title"` for root notes.
 fn get_path_for_note(conn: &Connection, parent_id: Option<NoteId>, title: &str) -> Result<String, AppError> {
     if let Some(pid) = parent_id {
         let parent_path: Option<String> = conn.query_row(
@@ -69,6 +89,8 @@ fn get_path_for_note(conn: &Connection, parent_id: Option<NoteId>, title: &str) 
     Ok(title.to_string())
 }
 
+/// Recursively updates `path_cached` for all non-deleted descendants of `parent_id`.
+/// Called after rename or move to keep the denormalised path column consistent.
 fn recalculate_descendant_paths(conn: &Connection, parent_id: NoteId, parent_path: &str) -> Result<(), AppError> {
     let mut stmt = conn.prepare("SELECT note_id, title FROM notes WHERE parent_note_id = ? AND lifecycle != 'deleted'")?;
     let mut rows = stmt.query([parent_id.0])?;
@@ -89,6 +111,8 @@ fn recalculate_descendant_paths(conn: &Connection, parent_id: NoteId, parent_pat
     Ok(())
 }
 
+/// Inserts a new note. Sets `indexing_status = 'pending'` so the scheduler picks it up.
+/// `path_cached` is computed from `parent_note_id` if not supplied explicitly.
 pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<NoteId, AppError> {
     let now = crate::db::time::now_seconds();
     let content_hash = blake3::hash(note.content.as_bytes()).to_hex().to_string();
@@ -129,6 +153,7 @@ pub fn insert(conn: &Connection, note: &crate::domain::note::NewNote) -> Result<
     Ok(NoteId(note_id))
 }
 
+/// Sets `indexing_status = 'indexed'` and clears any previous error message.
 pub fn mark_indexed(conn: &Connection, note_id: i64) -> Result<(), AppError> {
     conn.execute(
         "UPDATE notes SET indexing_status = 'indexed', indexing_error = NULL, indexed_at = ? WHERE note_id = ?",
@@ -137,6 +162,7 @@ pub fn mark_indexed(conn: &Connection, note_id: i64) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Records an indexing failure: sets `indexing_status = 'failed'` and stores the error message.
 pub fn record_failure(conn: &Connection, note_id: i64, error: &str) -> Result<(), AppError> {
     conn.execute(
         "UPDATE notes SET indexing_status = 'failed', indexing_error = ?, updated_at = ? WHERE note_id = ?",
@@ -145,6 +171,7 @@ pub fn record_failure(conn: &Connection, note_id: i64, error: &str) -> Result<()
     Ok(())
 }
 
+/// Marks the note as soft-deleted (`lifecycle = 'deleted'`). The row is preserved for recovery.
 pub fn soft_delete(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), AppError> {
     conn.execute(
         "UPDATE notes SET lifecycle = 'deleted', updated_at = ? WHERE note_id = ?",
@@ -153,6 +180,7 @@ pub fn soft_delete(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(
     Ok(())
 }
 
+/// Restores a soft-deleted note back to `lifecycle = 'active'`.
 pub fn restore(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), AppError> {
     conn.execute(
         "UPDATE notes SET lifecycle = 'active', updated_at = ? WHERE note_id = ?",
@@ -161,6 +189,7 @@ pub fn restore(conn: &Connection, note_id: i64, updated_at: i64) -> Result<(), A
     Ok(())
 }
 
+/// Renames a note and updates `path_cached` for the note and all its descendants.
 pub fn rename(conn: &Connection, note_id: i64, new_title: &str, updated_at: i64) -> Result<(), AppError> {
     let parent_id_opt: Option<i64> = conn.query_row(
         "SELECT parent_note_id FROM notes WHERE note_id = ?",
@@ -179,6 +208,8 @@ pub fn rename(conn: &Connection, note_id: i64, new_title: &str, updated_at: i64)
     Ok(())
 }
 
+/// Walks the parent chain from `descendant_id` upward to check whether `ancestor_id` is reachable.
+/// Used by `move_note` to prevent circular parent-child relationships.
 fn is_descendant(conn: &Connection, ancestor_id: i64, descendant_id: i64) -> Result<bool, AppError> {
     let mut current_id = descendant_id;
     loop {
@@ -201,6 +232,8 @@ fn is_descendant(conn: &Connection, ancestor_id: i64, descendant_id: i64) -> Res
     Ok(false)
 }
 
+/// Moves a note under a new parent (or to the root if `new_parent_id` is `None`).
+/// Guards against self-parenting and circular ancestry before writing.
 pub fn move_note(conn: &Connection, note_id: i64, new_parent_id: Option<NoteId>, updated_at: i64) -> Result<(), AppError> {
     if let Some(pid) = new_parent_id {
         if pid.0 == note_id {
@@ -261,6 +294,9 @@ pub fn get_all(conn: &Connection) -> Result<Vec<NoteListItem>, AppError> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Updates note content, writing a `diffy` unified-diff patch to `note_revisions` first.
+/// Sets `indexing_status = 'stale'` so the scheduler re-indexes the note.
+/// No-ops if the content is unchanged (avoids spurious revision entries).
 pub fn update_content_with_diff(
     conn: &mut Connection,
     note_id: i64,
@@ -314,6 +350,8 @@ pub fn set_status(conn: &Connection, note_id: i64, status: IndexingStatus) -> Re
     Ok(())
 }
 
+/// Directly replaces note content without creating a diff entry. Marks status as `'stale'`.
+/// Prefer `update_content_with_diff` for user-initiated edits.
 pub fn set_content(conn: &Connection, note_id: i64, content: &str) -> Result<(), AppError> {
     let now = crate::db::time::now_seconds();
     let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();

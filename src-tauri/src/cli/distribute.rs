@@ -1,6 +1,15 @@
+//! # CLI Draft Distribution Handler
+//!
+//! Subcommand handler that runs the thematic draft distribution pipeline.
+//! Recommends placement for draft sections, presents a preview to the user,
+//! and applies changes to SQLite if approved.
+
 use std::path::Path;
 use rusqlite::Connection;
 
+/// Runs the draft distribution pipeline in CLI mode.
+/// Analyzes the draft note with the LLM, prints the distribution plan,
+/// prompts the user for confirmation, and executes migrations, vectorization, and card generation.
 pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
     let models = crate::ai::models::scanner::scan_models();
     let llm_config = if let Some(llm_model) = models.iter().find(|m| matches!(m.kind, crate::ai::models::scanner::ModelKind::Llm)) {

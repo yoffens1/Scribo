@@ -1,3 +1,15 @@
+//! # Cards Repository
+//!
+//! CRUD for the `cards` table — SRS flash-cards linked to note sections.
+//!
+//! ## Key behaviours
+//!
+//! - `insert_with_schedule` atomically creates a card **and** a corresponding `schedules` row,
+//!   so every card is immediately eligible for the review queue.
+//! - `mark_stale_for_section` is called by the indexer when a section's content changes,
+//!   flagging all derived cards as outdated without deleting them.
+//! - `status` is a state machine: `fresh → stale → orphaned → suspended`.
+
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::AppError;
 use crate::domain::card::{Card, CardId, CardType, NewCard};
@@ -25,6 +37,8 @@ fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
     })
 }
 
+/// Atomically inserts a card and creates its initial `schedules` row.
+/// The schedule starts in state `'new'` so FSRS treats the card as unseen.
 pub fn insert_with_schedule(conn: &Connection, new: NewCard) -> Result<CardId, AppError> {
     let now = crate::db::time::now_seconds();
 
@@ -70,6 +84,7 @@ pub fn find_by_id(conn: &Connection, id: CardId) -> Result<Option<Card>, AppErro
     Ok(card)
 }
 
+/// Lists all cards for a note, ordered by insertion order.
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Card>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT card_id, note_id, chunk_id, card_type, custom_front, custom_back, cloze_mask,
@@ -107,6 +122,8 @@ pub fn update(
     Ok(())
 }
 
+/// Marks all non-suspended cards linked to `section_id` as `'stale'`.
+/// Called when the section content hash changes during re-indexing.
 pub fn mark_stale_for_section(conn: &Connection, section_id: i64) -> Result<i64, AppError> {
     let updated = conn.execute(
         "UPDATE cards SET status = 'stale' WHERE chunk_id = ? AND status != 'suspended'",

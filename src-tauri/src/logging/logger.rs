@@ -1,9 +1,16 @@
+//! # Structural Logger
+//!
+//! Implements namespaced logger structs supporting trace state tracking and structured logging.
+
 use crate::logging::types::{LogLevel, LogEvent, Trace, Sink};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH, Instant};
 
+/// A thread-safe logger tied to a hierarchical namespace.
+/// Can group log messages under a `Trace` span to measure duration and retain context.
 pub struct Logger {
+    /// Namespace identifier (e.g. "scribo.ai.embedding").
     pub namespace: String,
     current_trace: Mutex<Option<Trace>>,
     trace_instant: Mutex<Option<Instant>>,
@@ -13,6 +20,7 @@ pub struct Logger {
 }
 
 impl Logger {
+    /// Creates a new `Logger` instance.
     pub fn new(
         namespace: String,
         enabled: bool,
@@ -29,6 +37,7 @@ impl Logger {
         }
     }
 
+    /// Spawns a child logger inheriting this logger's configuration, with a nested namespace.
     pub fn child(&self, sub_namespace: &str) -> Self {
         Self::new(
             format!("{}.{}", self.namespace, sub_namespace),
@@ -38,17 +47,20 @@ impl Logger {
         )
     }
 
+    /// Generates a reasonably unique trace ID without needing external dependencies.
     fn generate_trace_id() -> String {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        // Generates a reasonably unique trace ID without needing external dependencies
         format!("{:x}-{:x}", now.as_secs(), now.subsec_nanos())
     }
 
+    /// Gets current epoch timestamp in milliseconds.
     fn get_now_ms() -> f64 {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         now.as_secs_f64() * 1000.0 + now.subsec_nanos() as f64 / 1_000_000.0
     }
 
+    /// Starts a new trace span with a descriptive label and optional metadata.
+    /// Returns the trace ID.
     pub fn start_trace(&self, label: &str, meta: Option<serde_json::Value>) -> String {
         if !self.enabled {
             return String::new();
@@ -74,6 +86,8 @@ impl Logger {
         id
     }
 
+    /// Logs a structured event at a specified level, stage, and duration.
+    /// Also appends the event to the active trace span if one is currently open.
     pub fn log(
         &self,
         level: LogLevel,
@@ -108,6 +122,7 @@ impl Logger {
         }
     }
 
+    /// Automatically logs duration and errors of a asynchronous closure.
     pub async fn time<T, F, Fut>(&self, stage: &str, f: F, data: Option<serde_json::Value>) -> Result<T, String>
     where
         F: FnOnce() -> Fut,
@@ -132,6 +147,8 @@ impl Logger {
         }
     }
 
+    /// Concludes the current trace span, calculates duration, merges optional metadata,
+    /// logs the completion, and flushes the trace payload to all registered sinks.
     pub async fn end_trace(&self, meta: Option<serde_json::Value>) -> Option<Trace> {
         let mut trace_opt = self.current_trace.lock().take();
         let instant_opt = self.trace_instant.lock().take();
@@ -173,18 +190,22 @@ impl Logger {
         }
     }
 
+    /// Logs a message at Debug severity.
     pub fn debug(&self, msg: &str) {
         self.log(LogLevel::Debug, "general", msg, None, None);
     }
 
+    /// Logs a message at Info severity.
     pub fn info(&self, msg: &str) {
         self.log(LogLevel::Info, "general", msg, None, None);
     }
 
+    /// Logs a message at Warn severity.
     pub fn warn(&self, msg: &str) {
         self.log(LogLevel::Warn, "general", msg, None, None);
     }
 
+    /// Logs a message at Error severity.
     pub fn error(&self, msg: &str) {
         self.log(LogLevel::Error, "general", msg, None, None);
     }

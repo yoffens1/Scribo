@@ -1,16 +1,45 @@
+//! # Schema Module
+//!
+//! Manages the SQLite schema lifecycle: creation, incremental migration, and integrity checks.
+//!
+//! ## Version history
+//!
+//! | Version | Description |
+//! |---|---|
+//! | v1  | Initial schema (notes + fragments) |
+//! | v11 | Hierarchical notes (parent_note_id, path_cached, sort_order, is_pinned, etc.) |
+//! | v12 | Section byte offsets + `distribution_runs` table |
+//! | v13 | Unified `chunks` table (merges `fragments` + `sections`); FTS5 triggers; `embedding_cache` |
+//! | v14 | Hierarchical tags (`tags`, `tag_closure`, `note_tags`, `chunk_tags`) |
+//! | v15 | `lifecycle` replaces boolean flags; card `status` enum; FSRS cascade triggers |
+//!
+//! ## Migration strategy
+//!
+//! Each version gate is a simple `if version == "N"` block that runs `execute_batch` and bumps
+//! `meta.schema_version`. A fresh database skips all migrations and writes directly at the latest version.
+
 pub mod helpers;
 pub mod tables;
 
 use rusqlite::Connection;
 use crate::error::AppError;
 
+/// Returns `true` if `name` exists in `sqlite_master`.
 fn table_exists(conn: &Connection, name: &str) -> Result<bool, AppError> {
     let mut stmt = conn.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")?;
     let exists = stmt.exists([name])?;
     Ok(exists)
 }
 
-/// Главная функция инициализации схемы БД Scribo
+/// Initialises the schema on first launch or runs incremental migrations on an existing database.
+///
+/// ## Sequence
+///
+/// 1. Run `PRAGMA integrity_check` to detect file corruption.
+/// 2. Detect whether the database is fresh (no `meta` table) or existing.
+///    - **Fresh**: create all tables at the current version in one shot.
+///    - **Existing**: apply each version gate sequentially until `schema_version = 15`.
+/// 3. Recover any notes stuck in `indexing_status = 'indexing'` from a previous crash.
 pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     // 1. Проверяем целостность файла
     println!("Init: check_integrity");

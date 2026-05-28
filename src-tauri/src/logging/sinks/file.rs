@@ -1,14 +1,20 @@
+//! # File Logging Sink
+//!
+//! Outputs serialized JSON files representing completed tracing spans onto disk.
+
 use crate::logging::types::{Sink, LogEvent, Trace};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use std::pin::Pin;
 use std::future::Future;
 
+/// Sink that writes trace spans as pretty-printed JSON files inside a targeted folder.
 pub struct FileSink {
     dir: PathBuf,
 }
 
 impl FileSink {
+    /// Creates a new `FileSink` that writes traces under the specified path.
     pub fn new<P: AsRef<Path>>(dir: P) -> Self {
         Self {
             dir: dir.as_ref().to_path_buf(),

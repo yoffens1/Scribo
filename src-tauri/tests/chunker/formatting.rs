@@ -1,9 +1,9 @@
-use scribo_lib::fragmenter::clean::transforms::*;
+use scribo_lib::fragmenter::clean::markdown::*;
 
 #[test]
-fn test_remove_empty_lines() {
+fn test_collapse_blank_lines() {
     let input = "Line 1\n\n\nLine 2\n\nLine 3";
-    assert_eq!(remove_empty_lines(input), "Line 1\nLine 2\nLine 3");
+    assert_eq!(collapse_blank_lines(input), "Line 1\nLine 2\nLine 3");
 }
 
 #[test]

@@ -1,6 +1,26 @@
+//! # Classifier — Distribute Pipeline
+//!
+//! Post-processes a `Vec<ChunkDistributionPlan>` produced by the LLM batch analysis step
+//! to infer implicit parent-child relationships between chunks that are both creating new notes.
+//!
+//! ## Heuristic Linking (`apply_heuristic_linking`)
+//!
+//! When two chunks both have `DistributeAction::CreateChild`, the heuristic checks whether
+//! one title is a sub-topic of the other by comparing their lowercase word sets:
+//!
+//! - **Subset match**: all words of title B are contained in title A → A is a parent of B.
+//! - **Prefix match**: any word of B (length ≥ 4) is a prefix of a word in A, or vice versa.
+//!
+//! The *longer* title is considered the more specific (child) note.
+//! Its `parent_note_id` is set to a negative temporary ID (`-(idx + 1)`) that
+//! [`apply_distribution`](crate::services::distribute::apply::apply_distribution)
+//! resolves to the real `NoteId` once the parent note is created.
+
 use crate::domain::distribute::{ChunkDistributionPlan, DistributeAction};
 
+/// Abstraction over classification strategies.
 pub trait Classifier: Send + Sync {
+    /// Post-processes chunk plans in-place, potentially modifying `recommendation.action`.
     fn classify(&self, chunks: &mut [ChunkDistributionPlan]);
 }
 
@@ -18,6 +38,8 @@ impl Classifier for HeuristicClassifier {
     }
 }
 
+/// Infers parent-child relationships between chunks that are both creating new notes.
+/// Mutates `recommendation.action` in-place for matched child chunks.
 pub fn apply_heuristic_linking(chunks: &mut [ChunkDistributionPlan]) {
     let mut new_notes: Vec<(usize, String)> = Vec::new();
     for chunk in chunks.iter() {

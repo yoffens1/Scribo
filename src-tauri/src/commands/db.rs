@@ -1,9 +1,15 @@
+//! # Database Commands
+//!
+//! Tauri commands for opening, closing, and managing the SQLite vault lifecycle.
+
 use crate::error::AppError;
 use crate::DbState;
 use tauri::State;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
+/// Opens a SQLite connection pool to `db_path` and runs schema migrations.
+/// Replaces the global `DbState::pool` and clears the language cache.
 #[tauri::command]
 pub fn db_initialize(
     state: State<'_, DbState>,
@@ -41,9 +47,12 @@ pub fn db_initialize(
     }
 
     *state.inner().pool.write() = Some(pool);
+    *state.inner().cached_vault_lang.write() = None;
     Ok(())
 }
 
+/// Closes the active database connection.
+/// Runs `PRAGMA optimize` before dropping the pool to update SQLite query planner statistics.
 #[tauri::command]
 pub fn db_close(state: State<'_, DbState>) -> Result<(), AppError> {
     let mut guard = state.inner().pool.write();
@@ -54,6 +63,7 @@ pub fn db_close(state: State<'_, DbState>) -> Result<(), AppError> {
             let _ = conn.execute_batch("PRAGMA optimize;");
         }
     }
+    *state.inner().cached_vault_lang.write() = None;
     *guard = None; // Dropping the pool closes all connections.
     Ok(())
 }
@@ -76,6 +86,9 @@ pub async fn db_vacuum(state: State<'_, DbState>) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Manually triggers `PRAGMA optimize`.
+/// Called by the frontend occasionally (e.g., when the app goes idle) to ensure
+/// query plans remain fast as data grows.
 #[tauri::command]
 pub fn db_optimize(state: State<'_, DbState>) -> Result<(), AppError> {
     state.with_conn(|conn| {

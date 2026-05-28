@@ -1,9 +1,28 @@
+//! # Fragments Repository
+//!
+//! CRUD and search operations for `chunks` rows at **`level = 1`** (leaf fragments).
+//!
+//! ## Two search modes
+//!
+//! - **`search`** — FTS5/BM25 keyword search via the `chunks_fts` virtual table.
+//!   Returns ranked hits with HTML `<b>snippet</b>` annotations.
+//! - **`vector_search`** — brute-force cosine ANN scan over all non-null `embedding` blobs.
+//!   Uses a `BinaryHeap` to maintain the top-`limit` candidates in O(n log k) time.
+//!   Results are hydrated in a second query to avoid loading all blobs into memory at once.
+//!
+//! ## Embedding storage
+//!
+//! Embeddings are stored as raw `BLOB` bytes (f32 little-endian, no header).
+//! `bytemuck::cast_slice` is used for zero-copy conversion between `&[u8]` and `&[f32]`.
+
 use rusqlite::Connection;
 use crate::error::AppError;
 use crate::domain::fragment::{FragmentInsertRow, Fragment, FragmentId};
 use crate::domain::note::NoteId;
 use crate::domain::search::{SearchHit, ScoredHit};
 
+/// A fragment enriched with its parent note's title and filesystem path.
+/// Used by list endpoints that need to display fragment context.
 #[derive(Debug, Clone)]
 pub struct FragmentWithNote {
     pub fragment: Fragment,
@@ -11,6 +30,7 @@ pub struct FragmentWithNote {
     pub note_title: String,
 }
 
+/// Deletes all `level = 1` chunks belonging to `note_id`. Used before a full re-index.
 pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
         "DELETE FROM chunks WHERE note_id = ? AND level = 1",
@@ -19,6 +39,7 @@ pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppErro
     Ok(deleted as i64)
 }
 
+/// Deletes a single fragment by its `chunk_id`. Level guard prevents accidental section deletion.
 pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     conn.execute(
         "DELETE FROM chunks WHERE chunk_id = ? AND level = 1",
@@ -27,6 +48,8 @@ pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Batch-inserts multiple fragments for a note in a single transaction.
+/// Used by the legacy bulk-import path.
 pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>) -> Result<(), AppError> {
     let tx = conn.transaction()?;
     {
@@ -51,6 +74,7 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
     Ok(())
 }
 
+/// Returns all `level = 1` fragments for `note_id`, ordered by `order_index`.
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Fragment>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT chunk_id, note_id, order_index, clean_text, clean_text_hash, token_count, embedding, parent_chunk_id
@@ -72,6 +96,8 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Fragment>, Ap
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Updates an existing fragment's clean text and hash.
+/// If `clear_embedding` is `true`, sets `embedding = NULL` so the embedder knows it needs refreshing.
 pub fn update(
     conn: &Connection,
     note_id: i64,
@@ -99,6 +125,8 @@ pub fn update(
     Ok(())
 }
 
+/// Inserts a single fragment row. Returns the new `chunk_id`.
+/// `embedding` may be an empty slice when the embedding has not been computed yet.
 pub fn insert_single(
     conn: &Connection,
     note_id: i64,
@@ -117,6 +145,8 @@ pub fn insert_single(
     Ok(conn.last_insert_rowid())
 }
 
+/// Writes the embedding blob for a specific fragment identified by `(note_id, order_index)`.
+/// Called by the embedding pipeline after `insert_single` has created the row.
 pub fn set_embedding(
     conn: &Connection,
     note_id: i64,
@@ -130,6 +160,8 @@ pub fn set_embedding(
     Ok(())
 }
 
+/// Returns fragments joined with their parent note metadata.
+/// Optionally filtered by `note_id`; optionally includes soft-deleted notes.
 pub fn list_fragments_with_note(
     conn: &Connection,
     filter_note_id: Option<i64>,
@@ -179,6 +211,9 @@ pub fn list_fragments_with_note(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// FTS5/BM25 keyword search. Matches against the `chunks_fts` virtual table
+/// and returns snippets with `<b>highlighted</b>` query terms.
+/// Only searches `level = 1` chunks belonging to `'active'` notes.
 pub fn search(
     conn: &Connection,
     query: &str,
@@ -222,12 +257,16 @@ pub fn search(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Zero-copy cast from embedding `BLOB` bytes to `f32` slice.
+/// Requires the blob to have been stored as raw `f32` little-endian (no header).
 fn bytes_to_f32_slice(bytes: &[u8]) -> &[f32] {
     bytemuck::cast_slice(bytes)
 }
 
-use crate::utils::cosine_similarity;
+use crate::ai::cosine_similarity_normalized;
 
+/// Internal record for the ANN heap — ordered by similarity descending.
+/// `Ord` is reversed so `BinaryHeap` acts as a min-heap, enabling O(n log k) top-k selection.
 #[derive(Debug)]
 struct HitRecord {
     fragment_id: i64,
@@ -250,6 +289,15 @@ impl Ord for HitRecord {
     }
 }
 
+/// Brute-force cosine ANN search over all stored embeddings.
+///
+/// ## Algorithm
+/// 1. Reads `(chunk_id, embedding)` rows for all active notes (filtered by `level`).
+/// 2. Computes normalised cosine similarity for each row (assumes unit-norm vectors).
+/// 3. Maintains a min-heap of size `limit` — O(n log k) overall.
+/// 4. Hydrates the top-k hits with full metadata in a second SQL query.
+///
+/// `level = None` searches across all chunk levels; `level = Some(0)` = sections, `Some(1)` = fragments.
 pub fn vector_search(
     conn: &Connection,
     query_embedding_bytes: &[u8],
@@ -283,7 +331,7 @@ pub fn vector_search(
             let blob_ref = row.get_ref(1)?;
             if let rusqlite::types::ValueRef::Blob(bytes) = blob_ref {
                 let cand_vector = bytes_to_f32_slice(bytes);
-                let similarity = cosine_similarity(query_vector, cand_vector);
+                let similarity = cosine_similarity_normalized(query_vector, cand_vector);
                 
                 top_hits.push(HitRecord { fragment_id, similarity });
                 if top_hits.len() > limit {

@@ -1,7 +1,7 @@
 use crate::fragmenter::config::FragmentConfig;
 use crate::fragmenter::segment::{Atom, AtomKind};
 use crate::fragmenter::token::count_tokens;
-use crate::utils::cosine_similarity;
+use crate::ai::cosine_similarity;
 use crate::ai::LlmService;
 
 pub async fn segment(

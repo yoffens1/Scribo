@@ -1,4 +1,10 @@
-use std::env;
+//! # Scribo Command Line Interface (CLI)
+//!
+//! Provides CLI parsing, subcommand definitions, database configuration,
+//! and routing of commands to their respective CLI handlers.
+//! The CLI operates directly on the SQLite database without starting Tauri.
+
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use rusqlite::Connection;
 
@@ -6,8 +12,65 @@ pub mod import_dir;
 pub mod fragment_file;
 pub mod distribute;
 
+/// Command line interface parser for Scribo.
+#[derive(Parser, Debug)]
+#[command(name = "scribo", about = "Scribo CLI", version)]
+struct Cli {
+    /// Subcommand to execute.
+    #[command(subcommand)]
+    command: Commands,
+}
+
+/// Available subcommands for the CLI.
+#[derive(Subcommand, Debug)]
+#[command(rename_all = "kebab-case")]
+enum Commands {
+    /// Show current database status and check paths.
+    Status,
+    /// Add a new active note directly to the vault.
+    Add {
+        /// Title of the note.
+        title: String,
+        /// Markdown content of the note.
+        content: String,
+    },
+    /// Create a new draft note (used as incoming/inbox for drafts).
+    AddDraft {
+        /// Markdown content of the draft note.
+        content: String,
+    },
+    /// Distribute thematic sections of a draft note to existing active notes.
+    Distribute {
+        /// Identifier of the draft note.
+        note_id: i64,
+    },
+    /// List all active notes in the database.
+    List,
+    /// Search fragment texts using SQLite FTS5 search.
+    Search {
+        /// The search term query.
+        query: String,
+    },
+    /// Import an entire directory of markdown files and index them with local embeddings.
+    ImportDir {
+        /// Path to the directory to import.
+        path: String,
+    },
+    /// Run the markdown fragmenter on a specific file and output structural sections.
+    FragmentFile {
+        /// Path to the markdown file to inspect.
+        file_path: String,
+        /// Parsing mode (`--embedding`, `--generation`, `--structural`, `--paired`).
+        #[arg(default_value = "--paired")]
+        mode: String,
+    },
+}
+
+/// Resolves the file path to the Scribo SQLite database.
+/// Checks the local workspace `src-tauri` directory first, falls back to the system data directory,
+/// and defaults to the current working directory.
 fn get_db_path() -> PathBuf {
-    let mut path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     path.push("src-tauri");
     path.push("scribo_core.db");
     if path.exists() {
@@ -21,12 +84,21 @@ fn get_db_path() -> PathBuf {
             return path;
         }
     }
-    let mut path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     path.push("scribo_core.db");
     path
 }
 
+/// Entrypoint for handling commands from the CLI.
+/// Connects to the SQLite database, checks schema migrations, and routes the subcommand.
 pub fn handle_cli(args: Vec<String>) {
+    let cli = match Cli::try_parse_from(args) {
+        Ok(c) => c,
+        Err(err) => {
+            err.exit();
+        }
+    };
+
     let db_path = get_db_path();
     let mut conn = Connection::open(&db_path).expect("Failed to open database");
 
@@ -34,24 +106,12 @@ pub fn handle_cli(args: Vec<String>) {
         eprintln!("Warning: Failed to initialize schema: {}", e);
     }
 
-    if args.len() < 2 {
-        println!("Available commands: add, add-draft, distribute, list, search, import-dir, fragment-file");
-        return;
-    }
-
-    let command = &args[1];
-    match command.as_str() {
-        "status" => {
+    match cli.command {
+        Commands::Status => {
             println!("Database path: {}", db_path.display());
             println!("Ready to accept commands.");
         }
-        "add" => {
-            if args.len() < 4 {
-                println!("Usage: scribo add <title> <content>");
-                return;
-            }
-            let title = &args[2];
-            let content = &args[3];
+        Commands::Add { title, content } => {
             let note = crate::domain::note::NewNote {
                 title: title.clone(),
                 content: content.clone(),
@@ -60,57 +120,33 @@ pub fn handle_cli(args: Vec<String>) {
             let note_id = crate::db::repos::notes::insert(&conn, &note).unwrap();
             println!("Successfully added note: '{}' (ID: {})", title, note_id.0);
         }
-        "import-dir" => {
-            if args.len() < 3 {
-                println!("Usage: scribo import-dir <path>");
-                return;
-            }
-            import_dir::handle_import_dir(&mut conn, &args[2]);
+        Commands::ImportDir { path } => {
+            import_dir::handle_import_dir(&mut conn, &path);
         }
-        "fragment-file" => {
-            if args.len() < 3 {
-                println!("Usage: scribo fragment-file <file_path> [--embedding|--generation|--structural|--paired]");
-                return;
-            }
-            let file_path = &args[2];
-            let mode = args.get(3).map(|s| s.as_str()).unwrap_or("--paired");
-            fragment_file::handle_fragment_file(file_path, mode);
+        Commands::FragmentFile { file_path, mode } => {
+            fragment_file::handle_fragment_file(&file_path, &mode);
         }
-        "list" => {
+        Commands::List => {
             let notes = crate::db::repos::notes::get_all(&conn).unwrap();
             println!("--- SCRIBO NOTES ---");
             for note in notes {
                 println!("[ID: {}] {}", note.note_id.0, note.title);
             }
         }
-        "search" => {
-            if args.len() < 3 {
-                println!("Usage: scribo search <query>");
-                return;
-            }
-            let query = &args[2];
-            let mut stmt = conn.prepare(
-                "SELECT c.fragment_id, f.title, c.text_clean 
-                 FROM fragments_fts 
-                 JOIN fragments c ON c.fragment_id = fragments_fts.rowid
-                 JOIN notes f ON f.note_id = c.note_id
-                 WHERE fragments_fts MATCH ? LIMIT 5"
-            ).unwrap();
-            let rows = stmt.query_map([query], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-            }).unwrap();
+        Commands::Search { query } => {
+            let hits = crate::db::repos::fragments::search(&conn, &query, 5).unwrap();
             println!("Search results for '{}':", query);
-            for row in rows {
-                let (id, title, text) = row.unwrap();
-                println!("-> {} (Fragment ID: {})\n   \"{}\"\n", title, id, text.trim());
+            for scored in hits {
+                let hit = scored.hit;
+                println!(
+                    "-> {} (Fragment ID: {})\n   \"{}\"\n",
+                    hit.note_title.unwrap_or_else(|| "Untitled".to_string()),
+                    hit.fragment_id.0,
+                    hit.text.trim()
+                );
             }
         }
-        "add-draft" => {
-            if args.len() < 3 {
-                println!("Usage: scribo add-draft <content>");
-                return;
-            }
-            let content = &args[2];
+        Commands::AddDraft { content } => {
             let title = format!("Draft {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
             let note = crate::domain::note::NewNote {
                 title,
@@ -121,16 +157,8 @@ pub fn handle_cli(args: Vec<String>) {
             let note_id = crate::db::repos::notes::insert(&conn, &note).unwrap();
             println!("Successfully created draft note with ID: {}", note_id.0);
         }
-        "distribute" => {
-            if args.len() < 3 {
-                println!("Usage: scribo distribute <note_id>");
-                return;
-            }
-            let note_id: i64 = args[2].parse().expect("Invalid note ID");
+        Commands::Distribute { note_id } => {
             distribute::handle_distribute(&mut conn, &db_path, note_id);
-        }
-        _ => {
-            println!("Unknown command. Available commands: add, add-draft, distribute, list, search, import-dir, fragment-file");
         }
     }
 }

@@ -1,3 +1,11 @@
+//! # OpenAI Embedding Provider
+//!
+//! Implements [`EmbeddingProvider`] for all OpenAI-compatible embedding endpoints.
+//! Also used for Ollama, LM Studio, and other OpenAI-API-compatible local servers.
+//!
+//! - `embed`: single-text call to `POST /embeddings` with `input: string`.
+//! - `embed_batch`: single-call batch via `input: [string, ...]` — one round-trip for any batch size.
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;

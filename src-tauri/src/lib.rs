@@ -1,3 +1,10 @@
+//! # Scribo Library Core
+//!
+//! Provides the primary library implementation for the Scribo application.
+//! It orchestrates submodules for AI services, database, CLI commands, markdown parsing (fragmenter),
+//! retrieval pipelines, Spaced Repetition System (SRS) review, and logging.
+//! It also houses the main entry point to register commands and run the Tauri application.
+
 mod commands;
 mod error;
 pub mod cli;
@@ -8,11 +15,13 @@ pub mod db;
 pub mod ai;
 pub mod retrieval;
 pub mod logging;
-pub mod utils;
 
 pub use error::AppError;
 pub use db::DbState;
 
+/// Initializes and launches the Tauri application.
+/// Sets up loggers, manages shared database state, registers IPC handlers,
+/// and starts the main event loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

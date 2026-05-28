@@ -1,8 +1,18 @@
+//! # Sections Repository
+//!
+//! CRUD operations for `chunks` rows at **`level = 0`** (heading blocks / sections).
+//!
+//! Sections store the **raw markdown** of a note's top-level structural divisions.
+//! Each section owns zero or more `level = 1` fragment children via `parent_chunk_id`.
+//! `content_offset_start` / `content_offset_end` are byte offsets into the original note content,
+//! used by the editor to highlight the corresponding text region.
+
 use rusqlite::Connection;
 use crate::error::AppError;
 use crate::domain::section::{Section, SectionId};
 use crate::domain::note::NoteId;
 
+/// Deletes all `level = 0` sections belonging to `note_id`.
 pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
         "DELETE FROM chunks WHERE note_id = ? AND level = 0",
@@ -11,6 +21,7 @@ pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppErro
     Ok(deleted as i64)
 }
 
+/// Deletes a single section by `chunk_id`. Level guard prevents accidental fragment deletion.
 pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     conn.execute(
         "DELETE FROM chunks WHERE chunk_id = ? AND level = 0",
@@ -19,6 +30,8 @@ pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Inserts a single section row. Returns the new `chunk_id`.
+/// `clean_hash` is the hash of the embedding-cleaned version of the same text (used for cache lookup).
 pub fn insert_single(
     conn: &Connection,
     note_id: i64,
@@ -50,6 +63,7 @@ pub fn insert_single(
     Ok(conn.last_insert_rowid())
 }
 
+/// Updates an existing section's text and byte-offset positions.
 pub fn update(
     conn: &Connection,
     section_id: i64,
@@ -80,6 +94,7 @@ pub fn update(
     Ok(())
 }
 
+/// Returns all `level = 0` sections for `note_id`, ordered by `order_index`.
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT chunk_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 
@@ -102,6 +117,7 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, App
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Fetches a single section by its `chunk_id`.
 pub fn find_by_id(conn: &Connection, id: SectionId) -> Result<Option<Section>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT chunk_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 

@@ -19,7 +19,7 @@ fn test_restore_tables() {
     flags.separate_tables_as_fragments = false;
     flags.preserve_tables = true;
     
-    let restored = scribo_lib::fragmenter::clean::tables::restore_tables(raw_chunks, &tables, &flags);
+    let restored = scribo_lib::fragmenter::pack::tables::restore_tables(raw_chunks, &tables, &flags);
     assert_eq!(restored.len(), 1);
     assert!(restored[0].text.contains("| H1 |"));
     assert!(!restored[0].text.contains("{{TABLE_0}}"));

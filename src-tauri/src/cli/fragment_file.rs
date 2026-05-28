@@ -1,3 +1,9 @@
+//! # CLI Fragment File Handler
+//!
+//! Subcommand handler to parse, chunk, and tokenize a specific markdown file
+//! on disk using different modes of the AST fragmenter.
+
+/// Chunk and analyze a markdown file on disk, listing generated fragments and their token counts.
 pub fn handle_fragment_file(file_path: &str, mode: &str) {
     let content = std::fs::read_to_string(file_path).expect("Could not read file");
     let default_opts = crate::fragmenter::FragmentConfig::default();

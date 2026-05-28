@@ -1,3 +1,10 @@
+//! # Logging Infrastructure
+//!
+//! Provides the primary logging framework for Scribo.
+//! Supports hierarchical logger namespacing, structured events, tracing context (spans),
+//! and multiple pluggable output destinations (sinks).
+//! Also configures standard system logging (`tracing-subscriber`) to output to console and file.
+
 pub mod types;
 pub mod logger;
 pub mod factory;
@@ -13,6 +20,9 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tracing_appender::non_blocking::WorkerGuard;
 
+/// Sets up the system-wide logging subscriber using the `tracing` library.
+/// Configures console (colored output) and rolling file appender destinations.
+/// Returns a `WorkerGuard` that must be kept alive to ensure non-blocking log output is flushed.
 pub fn setup_logger(app: &AppHandle) -> Result<WorkerGuard, Box<dyn std::error::Error>> {
     let app_dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from(".scribo"));
     let log_dir = app_dir.join("logs");
@@ -43,6 +53,8 @@ pub fn setup_logger(app: &AppHandle) -> Result<WorkerGuard, Box<dyn std::error::
     Ok(guard)
 }
 
+/// Tauri IPC command to bridge frontend logs to the Rust tracing backend.
+/// Maps frontend log levels, namespaces, and structured data into tracing macros.
 #[tauri::command]
 pub fn log_event(level: String, namespace: String, message: String, data: Option<serde_json::Value>) {
     let data_str = data.map(|d| d.to_string()).unwrap_or_default();

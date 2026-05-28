@@ -1,6 +1,13 @@
+//! # CLI Import Directory Handler
+//!
+//! Subcommand handler to scan a directory for markdown files, import them
+//! into the SQLite vault, run the fragmenter, and generate vector embeddings locally.
+
 use std::path::PathBuf;
 use rusqlite::Connection;
 
+/// Imports a folder of markdown files into the database.
+/// Parsed markdown files are saved as notes, chunked into fragments, and vectorized.
 pub fn handle_import_dir(conn: &mut Connection, dir_path_str: &str) {
     let dir_path = PathBuf::from(dir_path_str);
     if !dir_path.is_dir() {
