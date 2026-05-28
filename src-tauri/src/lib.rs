@@ -8,6 +8,7 @@ pub mod db;
 pub mod ai;
 pub mod retrieval;
 pub mod logging;
+pub mod utils;
 
 pub use error::AppError;
 pub use db::DbState;
