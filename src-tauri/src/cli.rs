@@ -11,6 +11,8 @@ use rusqlite::Connection;
 pub mod import_dir;
 pub mod fragment_file;
 pub mod distribute;
+pub mod query;
+pub mod reindex;
 
 /// Command line interface parser for Scribo.
 #[derive(Parser, Debug)]
@@ -64,6 +66,31 @@ enum Commands {
         #[arg(default_value = "--paired")]
         mode: String,
     },
+    /// Hybrid retrieval (FTS5 + vector + RRF). Embeds the query locally.
+    Query {
+        /// Search query text.
+        query: String,
+        /// Number of results to return.
+        #[arg(short = 'k', long, default_value_t = 5)]
+        top_k: usize,
+        /// Search mode: `hybrid` (default), `embedding`, or `keyword`.
+        #[arg(short = 'm', long, default_value = "hybrid")]
+        mode: String,
+        /// Enable HyDE (Hypothetical Document Embeddings) using default LLM.
+        #[arg(long)]
+        hyde: bool,
+        /// Enable Listwise reranking using default LLM.
+        #[arg(long)]
+        rerank: bool,
+        /// Enable Synonym expansion using static dictionary.
+        #[arg(long)]
+        expand: bool,
+        /// Hard threshold for RRF/similarity score.
+        #[arg(long, default_value_t = 0.005)]
+        min_score: f32,
+    },
+    /// Re-calculate and update embeddings for all fragments in the database.
+    Reindex,
 }
 
 /// Resolves the file path to the Scribo SQLite database.
@@ -159,6 +186,35 @@ pub fn handle_cli(args: Vec<String>) {
         }
         Commands::Distribute { note_id } => {
             distribute::handle_distribute(&mut conn, &db_path, note_id);
+        }
+        Commands::Query {
+            query,
+            top_k,
+            mode,
+            hyde,
+            rerank,
+            expand,
+            min_score,
+        } => {
+            use crate::retrieval::types::RetrievalMode;
+            let mode = match mode.as_str() {
+                "embedding" | "vector" => RetrievalMode::Embedding,
+                "keyword"   | "fts"    => RetrievalMode::Keyword,
+                _                      => RetrievalMode::Hybrid,
+            };
+            query::handle_query(
+                &db_path,
+                &query,
+                top_k,
+                mode,
+                hyde,
+                rerank,
+                expand,
+                min_score,
+            );
+        }
+        Commands::Reindex => {
+            reindex::handle_reindex(&mut conn);
         }
     }
 }
