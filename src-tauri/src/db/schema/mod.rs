@@ -48,10 +48,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v19");
+        println!("Init: fresh database, creating all tables directly at v22");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '19')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '22')",
             [],
         )?;
         conn.execute(
@@ -595,9 +595,106 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             version = "19".to_string();
         }
 
-        if version != "19" {
+        if version == "19" {
+            println!("Init: upgrading database from v19 to v20 (rename chunks -> fragments)");
+            conn.execute_batch(
+                "ALTER TABLE chunks RENAME TO fragments;
+                 ALTER TABLE fragments RENAME COLUMN chunk_id TO fragment_id;
+                 ALTER TABLE fragments RENAME COLUMN parent_chunk_id TO parent_fragment_id;
+
+                 ALTER TABLE chunk_embeddings RENAME TO fragment_embeddings;
+                 ALTER TABLE fragment_embeddings RENAME COLUMN chunk_id TO fragment_id;
+
+                 ALTER TABLE cards RENAME COLUMN chunk_id TO section_id;
+
+                 ALTER TABLE chunk_tags RENAME TO fragment_tags;
+                 ALTER TABLE fragment_tags RENAME COLUMN chunk_id TO fragment_id;
+
+                 DROP TRIGGER IF EXISTS chunks_fts_insert;
+                 DROP TRIGGER IF EXISTS chunks_fts_delete;
+                 DROP TRIGGER IF EXISTS chunks_fts_update;
+                 DROP TRIGGER IF EXISTS cards_status_orphaned_on_chunk_delete;
+                 DROP TABLE IF EXISTS chunks_fts;
+
+                 CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
+                     clean_text,
+                     content='fragments',
+                     content_rowid='fragment_id',
+                     tokenize='trigram'
+                 );
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments WHEN NEW.level = 1 BEGIN
+                     INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments WHEN OLD.level = 1 BEGIN
+                     INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF clean_text ON fragments WHEN NEW.level = 1 BEGIN
+                     INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
+                     INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS cards_status_orphaned_on_fragment_delete
+                 BEFORE DELETE ON fragments
+                 FOR EACH ROW
+                 BEGIN
+                    UPDATE cards
+                    SET status = 'orphaned',
+                        last_section_snapshot = OLD.raw_text
+                    WHERE section_id = OLD.fragment_id;
+                 END;
+
+                 INSERT INTO fragments_fts(rowid, clean_text)
+                 SELECT fragment_id, clean_text FROM fragments WHERE level = 1;
+
+                 DROP INDEX IF EXISTS idx_chunks_note_level;
+                 DROP INDEX IF EXISTS idx_chunks_parent;
+                 DROP INDEX IF EXISTS idx_chunks_clean_hash;
+                 DROP INDEX IF EXISTS idx_chunk_emb_model;
+                 DROP INDEX IF EXISTS idx_cards_section_id;
+                 DROP INDEX IF EXISTS idx_cards_active;
+
+                 CREATE INDEX IF NOT EXISTS idx_fragments_note_level ON fragments(note_id, level);
+                 CREATE INDEX IF NOT EXISTS idx_fragments_parent ON fragments(parent_fragment_id);
+                 CREATE INDEX IF NOT EXISTS idx_fragments_clean_hash ON fragments(clean_text_hash);
+                 CREATE INDEX IF NOT EXISTS idx_fragment_emb_model ON fragment_embeddings(embedding_model, embedding_model_version);
+                 CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(section_id);
+                 CREATE INDEX IF NOT EXISTS idx_cards_active ON cards(section_id) WHERE status != 'suspended';
+
+                 UPDATE meta SET value = '20' WHERE key = 'schema_version';"
+            )?;
+            version = "20".to_string();
+        }
+
+        // ── v20 → v21: add unique partial index to prevent duplicate leaf fragments ──
+        if version == "20" {
+            println!("Init: upgrading database from v20 to v21 (add idx_fragments_note_leaf_hash)");
+            conn.execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_fragments_note_leaf_hash
+                     ON fragments(note_id, clean_text_hash)
+                     WHERE level = 1;
+
+                 UPDATE meta SET value = '21' WHERE key = 'schema_version';"
+            )?;
+            version = "21".to_string();
+        }
+
+        // ── v21 → v22: drop all level=0 (section) rows — text is now level=1-only ──
+        if version == "21" {
+            println!("Init: upgrading database from v21 to v22 (remove level=0 section rows)");
+            conn.execute_batch(
+                "DELETE FROM fragments WHERE level = 0;
+
+                 UPDATE meta SET value = '22' WHERE key = 'schema_version';"
+            )?;
+            version = "22".to_string();
+        }
+
+        if version != "22" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 19", version
+                "Unsupported database version: got {}, expected 22", version
             )));
         }
     }
@@ -605,6 +702,17 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     // 2. Восстанавливаем прерванные задачи индексации
     println!("Init: recover_interrupted");
     helpers::recover_interrupted(conn)?;
+
+    // 3. Очищаем устаревшие/неактуальные записи в кэше эмбеддингов
+    println!("Init: evict old embedding cache entries");
+    let _ = conn.execute(
+        "DELETE FROM embedding_cache WHERE embedding_model != ?",
+        [crate::constants::EMBEDDING_MODEL],
+    );
+    let _ = conn.execute(
+        "DELETE FROM embedding_cache WHERE created_at < (strftime('%s','now') - 30 * 24 * 3600)",
+        [],
+    );
 
     Ok(())
 }

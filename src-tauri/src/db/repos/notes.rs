@@ -263,7 +263,7 @@ pub fn move_note(conn: &Connection, note_id: i64, new_parent_id: Option<NoteId>,
 
 pub fn count_fragments(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM chunks WHERE note_id = ? AND level = 1",
+        "SELECT COUNT(*) FROM fragments WHERE note_id = ? AND level = 1",
         rusqlite::params![note_id],
         |row| row.get(0),
     )?;

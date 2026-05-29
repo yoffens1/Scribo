@@ -29,7 +29,7 @@ pub fn check_integrity(conn: &Connection) -> Result<(), AppError> {
 /// `'failed'` so the scheduler re-indexes them on the next startup.
 pub fn recover_interrupted(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
-        "DELETE FROM chunks WHERE note_id IN (SELECT note_id FROM notes WHERE indexing_status = 'indexing');
+        "DELETE FROM fragments WHERE note_id IN (SELECT note_id FROM notes WHERE indexing_status = 'indexing');
          UPDATE notes SET indexing_status = 'failed', indexing_error = 'Interrupted indexing' WHERE indexing_status = 'indexing';"
     )?;
     Ok(())

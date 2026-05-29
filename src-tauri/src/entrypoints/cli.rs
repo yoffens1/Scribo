@@ -116,6 +116,7 @@ enum Commands {
 fn get_db_path() -> PathBuf {
     let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     path.push("src-tauri");
+    path.push("data");
     path.push("scribo_core.db");
     if path.exists() {
         return path;
@@ -129,6 +130,8 @@ fn get_db_path() -> PathBuf {
         }
     }
     let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    path.push("src-tauri");
+    path.push("data");
     path.push("scribo_core.db");
     path
 }
@@ -144,6 +147,9 @@ pub fn handle_cli(args: Vec<String>) {
     };
 
     let db_path = get_db_path();
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let mut conn = Connection::open(&db_path).expect("Failed to open database");
 
     if let Err(e) = crate::db::schema::initialize_schema(&mut conn) {

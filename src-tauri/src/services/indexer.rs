@@ -117,13 +117,12 @@ pub fn extract_heading_from_markdown(text: &str) -> (Option<String>, Option<i64>
 /// ## Steps
 ///
 /// 1. Fetch the note record.
-/// 2. Load existing sections and fragments for comparison.
+/// 2. Load existing level=1 fragments for hash-based diffing.
 /// 3. Run `fragment_paired` to get new `(generation, embedding)` pairs.
-/// 4. Compute byte offsets of each fragment in the original markdown.
-/// 5. Loop over `max(new, old)` indices:
-///    - If a new fragment exists: upsert section + fragment by hash comparison.
+/// 4. Loop over `max(new, old)` indices:
+///    - If a new fragment exists: upsert by hash comparison.
 ///    - If only an old row exists (count shrank): delete the orphaned row.
-/// 6. Mark the note as `indexed` and commit.
+/// 5. Mark the note as `indexed` and commit.
 pub fn persist_indexed_file(
     conn: &mut Connection,
     payload: IndexingPayload,
@@ -134,99 +133,41 @@ pub fn persist_indexed_file(
     let note = crate::db::repos::notes::get_by_id(conn, note_id)?
         .ok_or_else(|| AppError::Other(format!("Note not found: {}", note_id)))?;
 
-    // 2. Fetch existing fragments & sections for hash-based diff
+    // 2. Fetch existing level=1 fragments for hash-based diff
     let old_fragments = crate::db::repos::fragments::list_by_note(conn, note_id, payload.embedding_model)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    let old_sections = crate::db::repos::sections::list_by_note(conn, note_id)
         .map_err(|e| AppError::Other(e.to_string()))?;
 
     // 3. Run the fragmenter to obtain (generation_text, embedding_text) pairs
     let options = FragmentOptions::default();
     let chunk_result = fragment_paired(note.content.clone(), &options);
 
-    // 4. Calculate byte offsets of each fragment in the original markdown
-    let mut last_index = 0;
-    let mut section_offsets = Vec::new();
-    for pair in &chunk_result.pairs {
-        let text_raw = &pair.generation;
-        let (start, end) = find_safe_offsets(&note.content, text_raw, last_index);
-        section_offsets.push((start as i64, end as i64));
-        last_index = end;
-    }
-
-    let max_len = std::cmp::max(
-        chunk_result.pairs.len(),
-        std::cmp::max(old_sections.len(), old_fragments.len())
-    );
+    let max_len = std::cmp::max(chunk_result.pairs.len(), old_fragments.len());
 
     let tx = conn.transaction().map_err(|e| AppError::Other(e.to_string()))?;
 
-    // 5. Upsert or delete each slot
+    // 4. Upsert or delete each slot
     for i in 0..max_len {
         if i < chunk_result.pairs.len() {
             let pair = &chunk_result.pairs[i];
-
-            // Section (level=0): stores the raw/generation text with its offset
             let text_raw = &pair.generation;
             let source_hash_raw = content_hash(text_raw);
             let text_clean = &pair.embedding;
             let source_hash_clean = content_hash(text_clean);
-            let (offset_start, offset_end) = section_offsets[i];
 
-            let section_chunk_id = if i < old_sections.len() {
-                let old_sec = &old_sections[i];
-                // Only write if content or offset changed
-                if old_sec.raw_hash != source_hash_raw
-                    || old_sec.content_offset_start != offset_start
-                    || old_sec.content_offset_end != offset_end
-                {
-                    let (heading, level) = extract_heading_from_markdown(text_raw);
-                    crate::db::repos::sections::update(
-                        &tx,
-                        old_sec.id.0,
-                        text_raw,
-                        heading.as_deref(),
-                        level,
-                        &source_hash_raw,
-                        &source_hash_clean,
-                        offset_start,
-                        offset_end,
-                    ).map_err(|e| AppError::Other(e.to_string()))?;
-
-                    // Mark any SRS cards derived from this section as stale
-                    crate::db::repos::cards::mark_stale_for_section(&tx, old_sec.id.0)
-                        .map_err(|e| AppError::Other(e.to_string()))?;
-                }
-                old_sec.id.0
-            } else {
-                let (heading, level) = extract_heading_from_markdown(text_raw);
-                crate::db::repos::sections::insert_single(
-                    &tx,
-                    note_id,
-                    i as i64,
-                    text_raw,
-                    heading.as_deref(),
-                    level,
-                    &source_hash_raw,
-                    &source_hash_clean,
-                    offset_start,
-                    offset_end,
-                ).map_err(|e| AppError::Other(e.to_string()))?
-            };
-
-            // Fragment (level=1): stores the embedding-clean text (no embeddings yet)
             if i < old_fragments.len() {
                 let old_frag = &old_fragments[i];
                 if old_frag.clean_hash != source_hash_clean {
-                    // Hash changed — update the row and clear the stale embedding
+                    // Hash changed — update the row and invalidate the stale embedding
                     crate::db::repos::fragments::update(
                         &tx,
                         note_id,
                         i as i64,
+                        text_raw,
+                        &source_hash_raw,
                         text_clean,
                         &source_hash_clean,
-                        true, // embedding_needs_update = true
-                        Some(section_chunk_id),
+                        true, // clear_embedding = true
+                        None, // parent_fragment_id — no longer used
                     ).map_err(|e| AppError::Other(e.to_string()))?;
                 }
             } else {
@@ -234,21 +175,17 @@ pub fn persist_indexed_file(
                     &tx,
                     note_id,
                     i as i64,
+                    text_raw,
+                    &source_hash_raw,
                     text_clean,
                     &source_hash_clean,
-                    None,   // embedding blob — written later by the embedder
-                    &[],
-                    Some(section_chunk_id),
+                    None, // token_count — filled by embedding pipeline
+                    &[], // embedding blob — written later by the embedder
+                    None, // parent_fragment_id — no longer used
                 ).map_err(|e| AppError::Other(e.to_string()))?;
             }
         } else {
             // New fragment count shrank — delete orphaned rows
-            if i < old_sections.len() {
-                crate::db::repos::sections::delete_by_id(
-                    &tx,
-                    old_sections[i].id.0,
-                ).map_err(|e| AppError::Other(e.to_string()))?;
-            }
             if i < old_fragments.len() {
                 crate::db::repos::fragments::delete_by_id(
                     &tx,
@@ -258,7 +195,7 @@ pub fn persist_indexed_file(
         }
     }
 
-    // 6. Mark the note as indexed and commit the transaction
+    // 5. Mark the note as indexed and commit the transaction
     tx.execute(
         "UPDATE notes SET indexing_status = 'indexed', indexing_error = NULL, indexed_at = ?, embedding_model = ?, embedding_dimension = ?, indexing_version = ? WHERE note_id = ?",
         rusqlite::params![crate::db::time::now_seconds(), payload.embedding_model, payload.embedding_dim as i64, payload.indexing_version, note_id],

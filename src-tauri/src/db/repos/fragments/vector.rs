@@ -51,12 +51,12 @@ impl Ord for HitRecord {
 /// Brute-force cosine ANN search over all stored embeddings.
 ///
 /// ## Algorithm
-/// 1. Reads `(chunk_id, embedding)` rows for all active notes (filtered by `level`).
+/// 1. Reads `(fragment_id, embedding)` rows for all active notes (filtered by `level`).
 /// 2. Computes normalised cosine similarity for each row (assumes unit-norm vectors).
 /// 3. Maintains a min-heap of size `limit` — O(n log k) overall.
 /// 4. Hydrates the top-k hits with full metadata in a second SQL query.
 ///
-/// `level = None` searches across all chunk levels; `level = Some(0)` = sections, `Some(1)` = fragments.
+/// `level = None` searches across all fragment levels; `level = Some(0)` = sections, `Some(1)` = fragments.
 pub fn vector_search(
     conn: &Connection,
     query_embedding_bytes: &[u8],
@@ -71,16 +71,16 @@ pub fn vector_search(
 
     {
         let sql = if level.is_some() {
-            "SELECT ce.chunk_id, ce.embedding
-             FROM chunk_embeddings ce
-             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
+            "SELECT ce.fragment_id, ce.embedding
+             FROM fragment_embeddings ce
+             JOIN fragments frag ON frag.fragment_id = ce.fragment_id
              JOIN notes n ON n.note_id = frag.note_id
              WHERE frag.level = ?1 AND n.lifecycle = 'active'
                AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3".to_string()
         } else {
-            "SELECT ce.chunk_id, ce.embedding
-             FROM chunk_embeddings ce
-             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
+            "SELECT ce.fragment_id, ce.embedding
+             FROM fragment_embeddings ce
+             JOIN fragments frag ON frag.fragment_id = ce.fragment_id
              JOIN notes n ON n.note_id = frag.note_id
              WHERE n.lifecycle = 'active'
                AND ce.embedding_model = ?1 AND ce.embedding_model_version = ?2".to_string()
@@ -124,10 +124,10 @@ pub fn vector_search(
     let in_clause = ids.join(",");
 
     let sql = format!(
-        "SELECT frag.chunk_id, n.path_cached, frag.order_index, frag.clean_text, n.title, n.note_id
-         FROM chunks frag
+        "SELECT frag.fragment_id, n.path_cached, frag.order_index, frag.clean_text, n.title, n.note_id
+         FROM fragments frag
          JOIN notes n ON n.note_id = frag.note_id
-         WHERE frag.chunk_id IN ({})",
+         WHERE frag.fragment_id IN ({})",
          in_clause
     );
 

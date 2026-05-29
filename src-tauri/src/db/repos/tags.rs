@@ -114,7 +114,7 @@ pub fn create_tag(
 }
 
 pub fn delete_tag(conn: &Connection, tag_id: TagId) -> Result<(), AppError> {
-    // ON DELETE CASCADE automatically deletes children tags, note_tags, chunk_tags and tag_closure entries.
+    // ON DELETE CASCADE automatically deletes children tags, note_tags, fragment_tags and tag_closure entries.
     conn.execute("DELETE FROM tags WHERE tag_id = ?", [tag_id.0])?;
     Ok(())
 }
@@ -396,36 +396,36 @@ pub fn autocomplete_tags(
     Ok(res)
 }
 
-pub fn inherit_note_tags_to_chunks(
+pub fn inherit_note_tags_to_fragments(
     conn: &Connection,
     note_id: NoteId,
     tag_id: TagId,
 ) -> Result<(), AppError> {
     let now = crate::db::time::now_seconds();
     conn.execute(
-        "INSERT INTO chunk_tags (chunk_id, tag_id, source, created_at)
-         SELECT c.chunk_id, ?, 'inherited', ?
-         FROM chunks c
+        "INSERT INTO fragment_tags (fragment_id, tag_id, source, created_at)
+         SELECT c.fragment_id, ?, 'inherited', ?
+         FROM fragments c
          WHERE c.note_id = ?
            AND NOT EXISTS (
-             SELECT 1 FROM chunk_tags 
-             WHERE chunk_id = c.chunk_id AND tag_id = ?
+             SELECT 1 FROM fragment_tags 
+             WHERE fragment_id = c.fragment_id AND tag_id = ?
            )",
         rusqlite::params![tag_id.0, now, note_id.0, tag_id.0]
     )?;
     Ok(())
 }
 
-pub fn remove_inherited_note_tags_from_chunks(
+pub fn remove_inherited_note_tags_from_fragments(
     conn: &Connection,
     note_id: NoteId,
     tag_id: TagId,
 ) -> Result<(), AppError> {
     conn.execute(
-        "DELETE FROM chunk_tags
+        "DELETE FROM fragment_tags
          WHERE tag_id = ?
            AND source = 'inherited'
-           AND chunk_id IN (SELECT chunk_id FROM chunks WHERE note_id = ?)",
+           AND fragment_id IN (SELECT fragment_id FROM fragments WHERE note_id = ?)",
         rusqlite::params![tag_id.0, note_id.0]
     )?;
     Ok(())

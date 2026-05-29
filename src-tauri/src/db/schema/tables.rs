@@ -43,11 +43,11 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              CHECK (parent_note_id IS NULL OR parent_note_id <> note_id)
           );
 
-          CREATE TABLE IF NOT EXISTS chunks (
-             chunk_id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          CREATE TABLE IF NOT EXISTS fragments (
+             fragment_id             INTEGER PRIMARY KEY AUTOINCREMENT,
              note_id                 INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
-             parent_chunk_id         INTEGER REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-             level                   INTEGER NOT NULL,           -- 0 = section, 1 = fragment
+             parent_fragment_id      INTEGER REFERENCES fragments(fragment_id) ON DELETE CASCADE,
+             level                   INTEGER NOT NULL CHECK (level IN (0, 1)),           -- 0 = section, 1 = fragment
              order_index             INTEGER NOT NULL,
              
              raw_text                TEXT NOT NULL,
@@ -65,35 +65,35 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              token_count             INTEGER,
              
              -- general
-             kind                    TEXT NOT NULL DEFAULT 'fragment',
-             deleted_at              INTEGER,
+             kind                    TEXT NOT NULL DEFAULT 'fragment' CHECK (kind IN ('heading_block', 'fragment')),
              created_at              INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              updated_at              INTEGER NOT NULL DEFAULT (strftime('%s','now'))
           );
 
-          CREATE TABLE IF NOT EXISTS chunk_embeddings (
-             chunk_id                INTEGER NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+          CREATE TABLE IF NOT EXISTS fragment_embeddings (
+             fragment_id             INTEGER NOT NULL REFERENCES fragments(fragment_id) ON DELETE CASCADE,
              embedding_model         TEXT NOT NULL,
              embedding_model_version TEXT NOT NULL,
              dim                     INTEGER NOT NULL,
              embedding               BLOB NOT NULL,
              embedded_at             INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-             PRIMARY KEY (chunk_id, embedding_model, embedding_model_version)
+             PRIMARY KEY (fragment_id, embedding_model, embedding_model_version)
           );
 
           CREATE TABLE IF NOT EXISTS embedding_cache (
              clean_text_hash         TEXT NOT NULL,
              embedding_model         TEXT NOT NULL,
              embedding_model_version TEXT NOT NULL,
+             dim                     INTEGER NOT NULL,
              embedding               BLOB NOT NULL,
-             created_at              INTEGER NOT NULL,
+             created_at              INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              PRIMARY KEY (clean_text_hash, embedding_model, embedding_model_version)
           );
 
           CREATE TABLE IF NOT EXISTS cards (
              card_id INTEGER PRIMARY KEY AUTOINCREMENT,
              note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
-             chunk_id INTEGER REFERENCES chunks(chunk_id) ON DELETE SET NULL,
+             section_id INTEGER REFERENCES fragments(fragment_id) ON DELETE SET NULL,
              card_type TEXT NOT NULL DEFAULT 'heading'
                  CHECK (card_type IN ('heading', 'qa', 'cloze', 'manual')),
              custom_front TEXT,
@@ -112,32 +112,33 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
              target_type TEXT NOT NULL CHECK (target_type IN ('card', 'note')),
              target_id INTEGER NOT NULL,
-             state TEXT NOT NULL DEFAULT 'new'
-                 CHECK (state IN ('new', 'learning', 'review', 'relearning')),
+             
+             state INTEGER NOT NULL DEFAULT 0,
              stability REAL NOT NULL DEFAULT 0.0,
              difficulty REAL NOT NULL DEFAULT 0.0,
+             elapsed_days REAL NOT NULL DEFAULT 0.0,
+             scheduled_days REAL NOT NULL DEFAULT 0.0,
              reps INTEGER NOT NULL DEFAULT 0,
              lapses INTEGER NOT NULL DEFAULT 0,
              last_reviewed INTEGER,
-             next_review INTEGER,
-             UNIQUE(target_type, target_id)
+             next_review INTEGER
           );
 
           CREATE TABLE IF NOT EXISTS note_revisions (
-             history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+             revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
              note_id INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
              patch TEXT NOT NULL,
-             created_at INTEGER NOT NULL
+             created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
           );
 
           CREATE TABLE IF NOT EXISTS distribution_runs (
              run_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-             draft_id            INTEGER NOT NULL,
+             draft_id            INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
              plan_json           TEXT NOT NULL,
              result_json         TEXT,
              generator_version   TEXT NOT NULL,
              status              TEXT NOT NULL CHECK (status IN ('analyzed', 'applied', 'cancelled')),
-             created_at          INTEGER NOT NULL,
+             created_at          INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              applied_at          INTEGER
           );
 
@@ -145,31 +146,33 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              log_id INTEGER PRIMARY KEY AUTOINCREMENT,
              schedule_id INTEGER NOT NULL REFERENCES schedules(schedule_id) ON DELETE CASCADE,
              rating INTEGER NOT NULL,
-             reviewed_at INTEGER NOT NULL,
+             reviewed_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+             
+             prev_state INTEGER,
              prev_stability REAL,
              prev_difficulty REAL,
              elapsed_days INTEGER
           );
 
-          CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+          CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
              clean_text,
-             content='chunks',
-             content_rowid='chunk_id',
+             content='fragments',
+             content_rowid='fragment_id',
              tokenize = 'trigram'
           );
 
           -- Triggers
-          CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks WHEN NEW.level = 1 BEGIN
-             INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments WHEN NEW.level = 1 BEGIN
+             INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks WHEN OLD.level = 1 BEGIN
-             INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments WHEN OLD.level = 1 BEGIN
+             INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE OF clean_text ON chunks WHEN NEW.level = 1 BEGIN
-             INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
-             INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF clean_text ON fragments WHEN NEW.level = 1 BEGIN
+             INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
+             INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
           END;
 
           CREATE TRIGGER IF NOT EXISTS schedules_cascade_card_delete
@@ -188,42 +191,22 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              WHERE target_type = 'note' AND target_id = OLD.note_id;
           END;
 
-          CREATE TRIGGER IF NOT EXISTS schedules_check_target_insert
-          BEFORE INSERT ON schedules
+          CREATE TRIGGER IF NOT EXISTS review_logs_cascade_schedule_delete
+          AFTER DELETE ON schedules
           FOR EACH ROW
           BEGIN
-             SELECT CASE
-                 WHEN NEW.target_type = 'card'
-                      AND NOT EXISTS (SELECT 1 FROM cards WHERE card_id = NEW.target_id)
-                     THEN RAISE(ABORT, 'schedule.target_id does not match an existing card')
-                 WHEN NEW.target_type = 'note'
-                      AND NOT EXISTS (SELECT 1 FROM notes WHERE note_id = NEW.target_id)
-                     THEN RAISE(ABORT, 'schedule.target_id does not match an existing note')
-             END;
+             DELETE FROM review_logs
+             WHERE schedule_id = OLD.schedule_id;
           END;
 
-          CREATE TRIGGER IF NOT EXISTS schedules_check_target_update
-          BEFORE UPDATE OF target_type, target_id ON schedules
-          FOR EACH ROW
-          BEGIN
-             SELECT CASE
-                 WHEN NEW.target_type = 'card'
-                      AND NOT EXISTS (SELECT 1 FROM cards WHERE card_id = NEW.target_id)
-                     THEN RAISE(ABORT, 'schedule.target_id does not match an existing card')
-                 WHEN NEW.target_type = 'note'
-                      AND NOT EXISTS (SELECT 1 FROM notes WHERE note_id = NEW.target_id)
-                     THEN RAISE(ABORT, 'schedule.target_id does not match an existing note')
-             END;
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS chunks_orphaning_cards
-          BEFORE DELETE ON chunks
+          CREATE TRIGGER IF NOT EXISTS cards_status_orphaned_on_fragment_delete
+          BEFORE DELETE ON fragments
           FOR EACH ROW
           BEGIN
              UPDATE cards
              SET status = 'orphaned',
                  last_section_snapshot = OLD.raw_text
-             WHERE chunk_id = OLD.chunk_id;
+             WHERE section_id = OLD.fragment_id;
           END;
 
           -- Indexes
@@ -236,17 +219,22 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           CREATE INDEX IF NOT EXISTS idx_notes_drafts ON notes(updated_at DESC) WHERE lifecycle = 'draft';
           CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(updated_at DESC) WHERE is_pinned = 1 AND lifecycle != 'deleted';
 
-          CREATE INDEX IF NOT EXISTS idx_chunks_note_level ON chunks(note_id, level);
-          CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_chunk_id);
-          CREATE INDEX IF NOT EXISTS idx_chunks_clean_hash ON chunks(clean_text_hash);
-          CREATE INDEX IF NOT EXISTS idx_chunk_emb_model ON chunk_embeddings(embedding_model, embedding_model_version);
+          CREATE INDEX IF NOT EXISTS idx_fragments_note_level ON fragments(note_id, level);
+          CREATE INDEX IF NOT EXISTS idx_fragments_parent ON fragments(parent_fragment_id);
+          CREATE INDEX IF NOT EXISTS idx_fragments_clean_hash ON fragments(clean_text_hash);
+          -- Prevents duplicate leaf fragments (level=1) with identical text within the same note.
+          -- level=0 (sections) are excluded so section+fragment pairs with identical text are still allowed.
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_fragments_note_leaf_hash
+              ON fragments(note_id, clean_text_hash)
+              WHERE level = 1;
+          CREATE INDEX IF NOT EXISTS idx_fragment_emb_model ON fragment_embeddings(embedding_model, embedding_model_version);
           
-          CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(chunk_id);
+          CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(section_id);
           CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules (next_review) WHERE next_review IS NOT NULL;
           CREATE INDEX IF NOT EXISTS idx_schedules_target ON schedules (target_type, target_id);
           CREATE INDEX IF NOT EXISTS idx_review_logs_schedule ON review_logs(schedule_id);
           CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status);
-          CREATE INDEX IF NOT EXISTS idx_cards_active ON cards(chunk_id) WHERE status != 'suspended';
+          CREATE INDEX IF NOT EXISTS idx_cards_active ON cards(section_id) WHERE status != 'suspended';
 
           -- Tag System
           CREATE TABLE IF NOT EXISTS tags (
@@ -290,15 +278,15 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
 
           CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag_id);
 
-          CREATE TABLE IF NOT EXISTS chunk_tags (
-              chunk_id    INTEGER NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+          CREATE TABLE IF NOT EXISTS fragment_tags (
+              fragment_id INTEGER NOT NULL REFERENCES fragments(fragment_id) ON DELETE CASCADE,
               tag_id      INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
               source      TEXT NOT NULL DEFAULT 'inherited' CHECK (source IN ('manual', 'ai', 'inherited')),
               created_at  INTEGER NOT NULL,
-              PRIMARY KEY (chunk_id, tag_id)
+              PRIMARY KEY (fragment_id, tag_id)
           );
 
-          CREATE INDEX IF NOT EXISTS idx_chunk_tags_tag ON chunk_tags(tag_id);
+          CREATE INDEX IF NOT EXISTS idx_fragment_tags_tag ON fragment_tags(tag_id);
 
           CREATE TABLE IF NOT EXISTS retrieval_calibration (
               calibration_id       INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,9 +1,9 @@
 //! # Sections Repository
 //!
-//! CRUD operations for `chunks` rows at **`level = 0`** (heading blocks / sections).
+//! CRUD operations for `fragments` rows at **`level = 0`** (heading blocks / sections).
 //!
 //! Sections store the **raw markdown** of a note's top-level structural divisions.
-//! Each section owns zero or more `level = 1` fragment children via `parent_chunk_id`.
+//! Each section owns zero or more `level = 1` fragment children via `parent_fragment_id`.
 //! `content_offset_start` / `content_offset_end` are byte offsets into the original note content,
 //! used by the editor to highlight the corresponding text region.
 
@@ -15,28 +15,29 @@ use crate::domain::note::NoteId;
 /// Deletes all `level = 0` sections belonging to `note_id`.
 pub fn delete_by_note_id(conn: &Connection, note_id: i64) -> Result<i64, AppError> {
     let deleted = conn.execute(
-        "DELETE FROM chunks WHERE note_id = ? AND level = 0",
+        "DELETE FROM fragments WHERE note_id = ? AND level = 0",
         rusqlite::params![note_id],
     )?;
     Ok(deleted as i64)
 }
 
-/// Deletes a single section by `chunk_id`. Level guard prevents accidental fragment deletion.
+/// Deletes a single section by `fragment_id`. Level guard prevents accidental fragment deletion.
 pub fn delete_by_id(conn: &Connection, id: i64) -> Result<(), AppError> {
     conn.execute(
-        "DELETE FROM chunks WHERE chunk_id = ? AND level = 0",
+        "DELETE FROM fragments WHERE fragment_id = ? AND level = 0",
         rusqlite::params![id],
     )?;
     Ok(())
 }
 
-/// Inserts a single section row. Returns the new `chunk_id`.
+/// Inserts a single section row. Returns the new `fragment_id`.
 /// `clean_hash` is the hash of the embedding-cleaned version of the same text (used for cache lookup).
 pub fn insert_single(
     conn: &Connection,
     note_id: i64,
     index: i64,
     text_raw: &str,
+    text_clean: &str,
     heading: Option<&str>,
     heading_level: Option<i64>,
     raw_hash: &str,
@@ -45,14 +46,14 @@ pub fn insert_single(
     content_offset_end: i64,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, heading, heading_level, content_offset_start, content_offset_end, kind)
+        "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, heading, heading_level, content_offset_start, content_offset_end, kind)
          VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'heading_block')",
         rusqlite::params![
             note_id,
             index,
             text_raw,
             raw_hash,
-            text_raw,
+            text_clean,
             clean_hash,
             heading,
             heading_level,
@@ -68,6 +69,7 @@ pub fn update(
     conn: &Connection,
     section_id: i64,
     text_raw: &str,
+    text_clean: &str,
     heading: Option<&str>,
     heading_level: Option<i64>,
     raw_hash: &str,
@@ -76,13 +78,13 @@ pub fn update(
     content_offset_end: i64,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE chunks 
+        "UPDATE fragments 
          SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, heading = ?, heading_level = ?, content_offset_start = ?, content_offset_end = ? 
-         WHERE chunk_id = ? AND level = 0",
+         WHERE fragment_id = ? AND level = 0",
         rusqlite::params![
             text_raw,
             raw_hash,
-            text_raw,
+            text_clean,
             clean_hash,
             heading,
             heading_level,
@@ -97,8 +99,8 @@ pub fn update(
 /// Returns all `level = 0` sections for `note_id`, ordered by `order_index`.
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT chunk_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 
-         FROM chunks WHERE note_id = ? AND level = 0 ORDER BY order_index ASC"
+        "SELECT fragment_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 
+         FROM fragments WHERE note_id = ? AND level = 0 ORDER BY order_index ASC"
     )?;
     let rows = stmt.query_map([note_id], |row| {
         Ok(Section {
@@ -117,11 +119,11 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Section>, App
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Fetches a single section by its `chunk_id`.
+/// Fetches a single section by its `fragment_id`.
 pub fn find_by_id(conn: &Connection, id: SectionId) -> Result<Option<Section>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT chunk_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 
-         FROM chunks WHERE chunk_id = ? AND level = 0"
+        "SELECT fragment_id, note_id, order_index, raw_text, heading, heading_level, raw_text_hash, clean_text_hash, content_offset_start, content_offset_end 
+         FROM fragments WHERE fragment_id = ? AND level = 0"
     )?;
     let mut rows = stmt.query_map([id.0], |row| {
         Ok(Section {

@@ -34,11 +34,12 @@ pub struct CalibrationReport {
 /// Runs grid search to optimize RRF parameters on the calibration dataset.
 /// Saves the best values in the `meta` table.
 pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppError> {
-    let mut queries_path = std::path::PathBuf::from("calibration_queries.json");
-    let mut notes_path = std::path::PathBuf::from("calibration_notes.json");
+    let mut queries_path = std::path::PathBuf::from("data/calibration_queries.json");
+    let mut notes_path = std::path::PathBuf::from("data/calibration_notes.json");
 
     if !queries_path.exists() {
         let mut p = std::path::PathBuf::from("src-tauri");
+        p.push("data");
         p.push("calibration_queries.json");
         if p.exists() {
             queries_path = p;
@@ -46,6 +47,7 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
     }
     if !notes_path.exists() {
         let mut p = std::path::PathBuf::from("src-tauri");
+        p.push("data");
         p.push("calibration_notes.json");
         if p.exists() {
             notes_path = p;

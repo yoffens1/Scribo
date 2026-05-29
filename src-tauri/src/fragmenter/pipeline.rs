@@ -93,14 +93,6 @@ impl Fragmenter {
             raw_fragments = super::pack::tables::restore_tables(raw_fragments, &tables, &clean_flags);
         }
 
-        // 6. Linearise any table fragments that exceed the token limit.
-        //    (Only relevant when the Embedding profile is used.)
-        let max_tokens_limit = match config.packer {
-            Packer::TokenBudget { max_tokens, .. } => max_tokens,
-            _ => 256,
-        };
-        raw_fragments = super::pack::tables::linearize_table_fragments(raw_fragments, &clean_flags, max_tokens_limit);
-
         // 7. Apply the CleanProfile to every fragment and compute metadata.
         let mut fragments = Vec::new();
         for (idx, raw_frag) in raw_fragments.into_iter().enumerate() {
@@ -110,12 +102,10 @@ impl Fragmenter {
             if config.include_heading_in_fragments {
                 if let Some(heading) = &raw_frag.meta.suggested_title {
                     let clean_heading = super::clean::apply(heading, &clean_flags);
-                    if !clean_heading.is_empty() && cleaned_text != clean_heading {
-                        let first_line = cleaned_text.lines().next().unwrap_or("").trim();
-                        // Avoid doubling the heading when it's already the first line.
-                        if first_line != clean_heading {
-                            cleaned_text = format!("{}\n{}", clean_heading, cleaned_text);
-                        }
+                    let first_line_norm = cleaned_text.lines().next().unwrap_or("").trim().to_lowercase();
+                    let heading_norm = clean_heading.trim().to_lowercase();
+                    if !heading_norm.is_empty() && first_line_norm != heading_norm {
+                        cleaned_text = format!("{}\n{}", clean_heading, cleaned_text);
                     }
                 }
             }
@@ -179,12 +169,6 @@ impl Fragmenter {
             raw_fragments = super::pack::tables::restore_tables(raw_fragments, &tables, &clean_flags);
         }
 
-        let max_tokens_limit = match config.packer {
-            Packer::TokenBudget { max_tokens, .. } => max_tokens,
-            _ => 256,
-        };
-        raw_fragments = super::pack::tables::linearize_table_fragments(raw_fragments, &clean_flags, max_tokens_limit);
-
         let mut fragments = Vec::new();
         for (idx, raw_frag) in raw_fragments.into_iter().enumerate() {
             let mut cleaned_text = super::clean::apply(&raw_frag.text, &clean_flags);
@@ -192,11 +176,10 @@ impl Fragmenter {
             if config.include_heading_in_fragments {
                 if let Some(heading) = &raw_frag.meta.suggested_title {
                     let clean_heading = super::clean::apply(heading, &clean_flags);
-                    if !clean_heading.is_empty() && cleaned_text != clean_heading {
-                        let first_line = cleaned_text.lines().next().unwrap_or("").trim();
-                        if first_line != clean_heading {
-                            cleaned_text = format!("{}\n{}", clean_heading, cleaned_text);
-                        }
+                    let first_line_norm = cleaned_text.lines().next().unwrap_or("").trim().to_lowercase();
+                    let heading_norm = clean_heading.trim().to_lowercase();
+                    if !heading_norm.is_empty() && first_line_norm != heading_norm {
+                        cleaned_text = format!("{}\n{}", clean_heading, cleaned_text);
                     }
                 }
             }
@@ -243,11 +226,10 @@ impl Fragmenter {
                 if config.include_heading_in_fragments {
                     if let Some(heading) = &frag.meta.suggested_title {
                         let clean_heading = super::clean::apply(heading, &embed_flags);
-                        if !clean_heading.is_empty() && embedding_text != clean_heading {
-                            let first_line = embedding_text.lines().next().unwrap_or("").trim();
-                            if first_line != clean_heading {
-                                embedding_text = format!("{}\n{}", clean_heading, embedding_text);
-                            }
+                        let first_line_norm = embedding_text.lines().next().unwrap_or("").trim().to_lowercase();
+                        let heading_norm = clean_heading.trim().to_lowercase();
+                        if !heading_norm.is_empty() && first_line_norm != heading_norm {
+                            embedding_text = format!("{}\n{}", clean_heading, embedding_text);
                         }
                     }
                 }
@@ -285,11 +267,10 @@ impl Fragmenter {
                 if config.include_heading_in_fragments {
                     if let Some(heading) = &frag.meta.suggested_title {
                         let clean_heading = super::clean::apply(heading, &embed_flags);
-                        if !clean_heading.is_empty() && embedding_text != clean_heading {
-                            let first_line = embedding_text.lines().next().unwrap_or("").trim();
-                            if first_line != clean_heading {
-                                embedding_text = format!("{}\n{}", clean_heading, embedding_text);
-                            }
+                        let first_line_norm = embedding_text.lines().next().unwrap_or("").trim().to_lowercase();
+                        let heading_norm = clean_heading.trim().to_lowercase();
+                        if !heading_norm.is_empty() && first_line_norm != heading_norm {
+                            embedding_text = format!("{}\n{}", clean_heading, embedding_text);
                         }
                     }
                 }

@@ -5,6 +5,20 @@ pub fn apply(fragment: &str, flags: &CleanFlags) -> String {
     use std::borrow::Cow;
     type Transform = fn(&str) -> Cow<'_, str>;
 
+    let mut text_str = fragment.to_string();
+    if flags.linearize_tables {
+        let (body, tables) = crate::fragmenter::clean::tables::extract_tables(&text_str);
+        if !tables.is_empty() {
+            let mut restored = body;
+            for t in tables {
+                let linearized_rows = crate::fragmenter::clean::tables::linearize_table(&t.content);
+                let replacement = linearized_rows.join("\n");
+                restored = restored.replace(&t.placeholder, &replacement);
+            }
+            text_str = restored;
+        }
+    }
+
     let mut transforms: Vec<(bool, Transform)> = vec![
         (flags.remove_rules,           markdown::remove_horizontal_rules as Transform),
         (flags.remove_numbering,       markdown::remove_list_numbering as Transform),
@@ -26,7 +40,7 @@ pub fn apply(fragment: &str, flags: &CleanFlags) -> String {
     transforms.push((flags.strip_heading_markers,  markdown::strip_heading_markers as Transform));
     transforms.push((flags.compact_lines,          markdown::collapse_blank_lines as Transform));
 
-    let mut text = Cow::Borrowed(fragment);
+    let mut text = Cow::Owned(text_str);
     for (enabled, f) in transforms {
         if enabled {
             if let Cow::Owned(s) = f(&text) {

@@ -115,7 +115,7 @@ fn apply_append_actions(
                                 crate::domain::tag::TagSource::Ai,
                                 None,
                             );
-                            let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, NoteId(target_id), tag_id);
+                            let _ = crate::db::repos::tags::inherit_note_tags_to_fragments(conn, NoteId(target_id), tag_id);
                         }
                     }
                 }
@@ -200,7 +200,7 @@ fn apply_create_child_actions(
                                     crate::domain::tag::TagSource::Ai,
                                     None,
                                 );
-                                let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
+                                let _ = crate::db::repos::tags::inherit_note_tags_to_fragments(conn, new_id, tag_id);
                             }
                         }
                     }
@@ -246,7 +246,7 @@ fn apply_create_child_actions(
                             crate::domain::tag::TagSource::Ai,
                             None,
                         );
-                        let _ = crate::db::repos::tags::inherit_note_tags_to_chunks(conn, new_id, tag_id);
+                        let _ = crate::db::repos::tags::inherit_note_tags_to_fragments(conn, new_id, tag_id);
                     }
                 }
             }

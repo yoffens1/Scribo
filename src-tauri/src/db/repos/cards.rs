@@ -18,12 +18,12 @@ use crate::domain::section::SectionId;
 fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
     let card_type_str: String = row.get(3)?;
     let status_str: String = row.get(7)?;
-    let chunk_id_opt: Option<i64> = row.get(2)?;
+    let section_id_opt: Option<i64> = row.get(2)?;
     
     Ok(Card {
         id: CardId(row.get(0)?),
         note_id: crate::domain::NoteId(row.get(1)?),
-        section_id: chunk_id_opt.map(SectionId),
+        section_id: section_id_opt.map(SectionId),
         card_type: CardType::parse(&card_type_str).unwrap_or(CardType::Heading),
         custom_front: row.get(4)?,
         custom_back: row.get(5)?,
@@ -44,7 +44,7 @@ pub fn insert_with_schedule(conn: &Connection, new: NewCard) -> Result<CardId, A
 
     conn.execute(
         "INSERT INTO cards (
-            note_id, chunk_id, card_type, custom_front, custom_back, cloze_mask,
+            note_id, section_id, card_type, custom_front, custom_back, cloze_mask,
             status, last_section_snapshot, generated_by, source_raw_hash_at_creation,
             created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, 'fresh', NULL, ?, ?, ?, ?)",
@@ -76,7 +76,7 @@ pub fn insert_with_schedule(conn: &Connection, new: NewCard) -> Result<CardId, A
 
 pub fn find_by_id(conn: &Connection, id: CardId) -> Result<Option<Card>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT card_id, note_id, chunk_id, card_type, custom_front, custom_back, cloze_mask,
+        "SELECT card_id, note_id, section_id, card_type, custom_front, custom_back, cloze_mask,
                 status, last_section_snapshot, generated_by, source_raw_hash_at_creation, created_at, updated_at
          FROM cards WHERE card_id = ?"
     )?;
@@ -87,7 +87,7 @@ pub fn find_by_id(conn: &Connection, id: CardId) -> Result<Option<Card>, AppErro
 /// Lists all cards for a note, ordered by insertion order.
 pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Card>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT card_id, note_id, chunk_id, card_type, custom_front, custom_back, cloze_mask,
+        "SELECT card_id, note_id, section_id, card_type, custom_front, custom_back, cloze_mask,
                 status, last_section_snapshot, generated_by, source_raw_hash_at_creation, created_at, updated_at
          FROM cards
          WHERE note_id = ?
@@ -126,7 +126,7 @@ pub fn update(
 /// Called when the section content hash changes during re-indexing.
 pub fn mark_stale_for_section(conn: &Connection, section_id: i64) -> Result<i64, AppError> {
     let updated = conn.execute(
-        "UPDATE cards SET status = 'stale' WHERE chunk_id = ? AND status != 'suspended'",
+        "UPDATE cards SET status = 'stale' WHERE section_id = ? AND status != 'suspended'",
         rusqlite::params![section_id],
     )?;
     Ok(updated as i64)

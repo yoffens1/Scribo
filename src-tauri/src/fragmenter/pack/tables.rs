@@ -1,6 +1,6 @@
 use crate::fragmenter::config::CleanFlags;
 use crate::fragmenter::clean::tables::{
-    TableInfo, RE_TABLE_PLACEHOLDER, RE_HEADING_RESTORE, split_fragment_around_tables,
+    TableInfo, RE_TABLE_PLACEHOLDER, RE_HEADING_RESTORE, linearize_table,
 };
 use super::RawFragment;
 
@@ -28,12 +28,51 @@ pub fn restore_tables(
         }
 
         if flags.separate_tables_as_fragments && !fragment_tables.is_empty() {
-            let split_texts = split_fragment_around_tables(&fragment.text, &fragment_tables);
-            for t in split_texts {
-                result.push(RawFragment {
-                    text: t,
-                    meta: fragment.meta.clone(),
-                });
+            let mut current_texts = vec![fragment.text.clone()];
+            for t in &fragment_tables {
+                let mut next_texts = Vec::new();
+                for txt in current_texts {
+                    if let Some(idx) = txt.find(&t.placeholder) {
+                        let before = txt[..idx].trim().to_string();
+                        let after = txt[idx + t.placeholder.len()..].trim().to_string();
+                        if !before.is_empty() {
+                            next_texts.push(before);
+                        }
+                        next_texts.push(t.placeholder.clone());
+                        if !after.is_empty() {
+                            next_texts.push(after);
+                        }
+                    } else {
+                        next_texts.push(txt);
+                    }
+                }
+                current_texts = next_texts;
+            }
+
+            for txt in current_texts {
+                if txt.starts_with("{{TABLE_") && txt.ends_with("}}") {
+                    if let Some(t) = tables.iter().find(|t| t.placeholder == txt) {
+                        if flags.linearize_tables && flags.each_table_row_as_separate_fragment {
+                            let linearized_rows = linearize_table(&t.content);
+                            for row in linearized_rows {
+                                result.push(RawFragment {
+                                    text: row,
+                                    meta: fragment.meta.clone(),
+                                });
+                            }
+                        } else {
+                            result.push(RawFragment {
+                                text: t.content.clone(),
+                                meta: fragment.meta.clone(),
+                            });
+                        }
+                    }
+                } else {
+                    result.push(RawFragment {
+                        text: txt,
+                        meta: fragment.meta.clone(),
+                    });
+                }
             }
         } else {
             let mut restored = fragment.text.clone();
@@ -49,10 +88,20 @@ pub fn restore_tables(
 
     for t in tables {
         if !used.contains(&t.placeholder) {
-            result.push(RawFragment {
-                text: t.content.clone(),
-                meta: Default::default(),
-            });
+            if flags.linearize_tables && flags.each_table_row_as_separate_fragment {
+                let linearized_rows = linearize_table(&t.content);
+                for row in linearized_rows {
+                    result.push(RawFragment {
+                        text: row,
+                        meta: Default::default(),
+                    });
+                }
+            } else {
+                result.push(RawFragment {
+                    text: t.content.clone(),
+                    meta: Default::default(),
+                });
+            }
         }
     }
 
@@ -63,75 +112,4 @@ pub fn restore_tables(
             !lines.iter().all(|line| RE_HEADING_RESTORE.is_match(line))
         })
         .collect()
-}
-
-pub fn linearize_table_fragments(
-    fragments: Vec<RawFragment>,
-    flags: &CleanFlags,
-    max_tokens: usize,
-) -> Vec<RawFragment> {
-    if !flags.linearize_tables {
-        return fragments;
-    }
-
-    let mut result = Vec::new();
-    for fragment in fragments {
-        let (before, table_block, after) = crate::fragmenter::clean::tables::partition_table_lines(&fragment.text);
-        if table_block.is_empty() {
-            result.push(fragment);
-            continue;
-        }
-
-        let table_text = table_block.join("\n");
-        let mut rows = crate::fragmenter::clean::tables::linearize_table(&table_text);
-
-        let mut row_clean_flags = flags.clone();
-        row_clean_flags.lower_case = false;
-        row_clean_flags.compact_lines = false;
-        row_clean_flags.strip_heading_markers = false;
-        rows = rows.iter().map(|row| crate::fragmenter::clean::apply(row, &row_clean_flags)).collect();
-
-        let sub_fragments_text = if flags.each_table_row_as_separate_fragment {
-            rows
-        } else {
-            // We can pack them back using a token batch aggregator
-            let sub_atoms = rows.iter().map(|r| crate::fragmenter::segment::Atom::whole(r)).collect();
-            let packed = super::token_budget::pack(sub_atoms, max_tokens, 0);
-            packed.into_iter().map(|rf| rf.text).collect()
-        };
-
-        let mut sub_fragments: Vec<RawFragment> = sub_fragments_text
-            .into_iter()
-            .map(|t| RawFragment {
-                text: t,
-                meta: fragment.meta.clone(),
-            })
-            .collect();
-
-        if !before.is_empty() && !sub_fragments.is_empty() {
-            sub_fragments[0].text = format!("{}\n{}", before.join("\n"), sub_fragments[0].text);
-        } else if !before.is_empty() {
-            sub_fragments.push(RawFragment {
-                text: before.join("\n"),
-                meta: fragment.meta.clone(),
-            });
-        }
-
-        if !after.is_empty() && !sub_fragments.is_empty() {
-            let last_idx = sub_fragments.len() - 1;
-            sub_fragments[last_idx].text = format!("{}\n{}", sub_fragments[last_idx].text, after.join("\n"));
-        } else if !after.is_empty() {
-            sub_fragments.push(RawFragment {
-                text: after.join("\n"),
-                meta: fragment.meta.clone(),
-            });
-        }
-
-        if sub_fragments.is_empty() {
-            result.push(fragment);
-        } else {
-            result.extend(sub_fragments);
-        }
-    }
-    result
 }

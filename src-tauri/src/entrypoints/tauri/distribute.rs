@@ -32,7 +32,7 @@ pub fn compute_and_save_section_embeddings(
     embedding_model_version: &str,
 ) -> Result<(), AppError> {
     let mut stmt = conn.prepare(
-        "SELECT chunk_id FROM chunks WHERE note_id = ? AND level = 0"
+        "SELECT fragment_id FROM fragments WHERE note_id = ? AND level = 0"
     )?;
     let section_ids: Vec<i64> = stmt.query_map([note_id], |r| r.get(0))?
         .collect::<Result<Vec<i64>, _>>()?;
@@ -40,9 +40,9 @@ pub fn compute_and_save_section_embeddings(
     for sec_id in section_ids {
         let mut stmt_frags = conn.prepare(
             "SELECT ce.embedding 
-             FROM chunk_embeddings ce
-             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
-             WHERE frag.parent_chunk_id = ?1 AND frag.level = 1 
+             FROM fragment_embeddings ce
+             JOIN fragments frag ON frag.fragment_id = ce.fragment_id
+             WHERE frag.parent_fragment_id = ?1 AND frag.level = 1 
                AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3"
         )?;
         let frags: Vec<Vec<u8>> = stmt_frags.query_map(rusqlite::params![sec_id, embedding_model, embedding_model_version], |r| r.get(0))?
@@ -74,7 +74,7 @@ pub fn compute_and_save_section_embeddings(
             let mean_bytes = bytemuck::cast_slice::<f32, u8>(&sum_vec);
             let dim = sum_vec.len();
             conn.execute(
-                "INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+                "INSERT OR REPLACE INTO fragment_embeddings (fragment_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
                  VALUES (?, ?, ?, ?, ?, strftime('%s','now'))",
                 rusqlite::params![sec_id, embedding_model, embedding_model_version, dim, mean_bytes],
             )?;

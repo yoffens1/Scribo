@@ -69,29 +69,28 @@ pub fn handle_reindex(db_path: &Path, force: bool) {
                 let pool_guard = state.pool.read();
                 let conn = pool_guard.as_ref().unwrap().get().unwrap();
                 let mut stmt = conn.prepare(
-                    "SELECT chunk_id, clean_text FROM chunks
+                    "SELECT fragment_id, clean_text FROM fragments
                      WHERE note_id = ?1 AND level = 1"
                 ).unwrap();
                 let rows = stmt.query_map([note_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
                 rows.filter_map(Result::ok).collect()
             };
 
-            for (chunk_id, text) in texts {
+            for (fragment_id, text) in texts {
                 match embedder.embed(&text).await {
                     Ok(vec) => {
                         let bytes = bytemuck::cast_slice::<f32, u8>(&vec).to_vec();
                         let pool_guard = state.pool.read();
                         let conn = pool_guard.as_ref().unwrap().get().unwrap();
                         if let Err(e) = conn.execute(
-                            "UPDATE chunks
-                             SET embedding = ?1
-                             WHERE chunk_id = ?2",
-                            rusqlite::params![bytes, chunk_id],
+                            "INSERT OR REPLACE INTO fragment_embeddings (fragment_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+                             VALUES (?1, ?2, '1', ?3, ?4, strftime('%s','now'))",
+                            rusqlite::params![fragment_id, CURRENT_MODEL, CURRENT_DIM, bytes],
                         ) {
-                            eprintln!("Failed to update chunk {chunk_id} embedding in DB: {e}");
+                            eprintln!("Failed to update fragment {fragment_id} embedding in DB: {e}");
                         }
                     }
-                    Err(e) => eprintln!("embed failed for chunk {chunk_id}: {e}"),
+                    Err(e) => eprintln!("embed failed for fragment {fragment_id}: {e}"),
                 }
             }
 
