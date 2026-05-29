@@ -49,6 +49,8 @@ fsrs = "5.2.0"
 whatlang = "0.16"
 fuzzy-matcher = "0.3"
 regex = "1.12.3"
+stop-words = "0.8"
+rust-stemmers = "1.2"
 
 # Concurrency & Async Runtime
 rayon = "1.12.0"

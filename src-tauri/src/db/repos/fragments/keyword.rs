@@ -9,7 +9,7 @@ use crate::domain::search::{SearchHit, ScoredHit};
 /// and returns clean tokens (no quotes) for FTS5.
 pub fn get_fts_query_tokens(query: &str) -> Vec<String> {
     let lower = query.to_lowercase();
-    let stopword_set: std::collections::HashSet<&str> = crate::constants::STOPWORDS.iter().cloned().collect();
+    let stopword_set = crate::constants::get_stopwords();
 
     let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphanumeric())
@@ -18,7 +18,7 @@ pub fn get_fts_query_tokens(query: &str) -> Vec<String> {
 
     let mut filtered_words: Vec<String> = words
         .into_iter()
-        .filter(|w| !stopword_set.contains(w) && w.len() >= 3)
+        .filter(|w| !stopword_set.contains(*w) && w.len() >= 3)
         .map(|w| w.to_string())
         .collect();
 

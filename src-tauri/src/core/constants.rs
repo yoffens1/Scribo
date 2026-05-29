@@ -37,12 +37,25 @@ pub const GRID_RRF_KS: &[f32] = &[10.0, 20.0, 40.0, 60.0, 80.0, 100.0];
 pub const GRID_TERM_BOOST_WEIGHTS: &[f32] = &[0.0, 0.01, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2, 0.3];
 
 // ── Stopwords list ──
-pub const STOPWORDS: &[&str] = &[
-    // English stopwords
-    "what", "is", "are", "the", "a", "an", "and", "or", "in", "of", "to", "for", "with", "on", "at", "by", "from", "this", "that", "it", "you", "we", "they", "how", "why", "which",
-    // Russian stopwords
-    "что", "такое", "это", "как", "почему", "зачем", "какой", "какая", "какие",
-    "является", "означает", "значит", "дай", "расскажи", "объясни",
-    "и", "в", "на", "с", "ли", "или", "но", "а", "для", "по", "из", "от", "до",
-    "при", "к", "у", "о", "об", "же", "бы", "вы", "мы", "они"
-];
+pub fn get_stopwords() -> &'static std::collections::HashSet<String> {
+    static STOPWORDS_CELL: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    STOPWORDS_CELL.get_or_init(|| {
+        let mut set = std::collections::HashSet::new();
+        // stop-words crate: Russian and English
+        for w in stop_words::get(stop_words::LANGUAGE::English) {
+            set.insert(w.to_lowercase());
+        }
+        for w in stop_words::get(stop_words::LANGUAGE::Russian) {
+            set.insert(w.to_lowercase());
+        }
+        // extra custom Russian question/stop words
+        let extra = [
+            "такое", "это", "как", "почему", "зачем", "какой", "какая", "какие",
+            "является", "означает", "значит", "дай", "расскажи", "объясни", "что"
+        ];
+        for w in &extra {
+            set.insert(w.to_string());
+        }
+        set
+    })
+}

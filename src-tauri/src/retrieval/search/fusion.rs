@@ -77,46 +77,77 @@ pub fn rrf(
 }
 
 /// Applies a score boost to search results for exact keyword query term matches.
+fn stem_word(word: &str) -> String {
+    static RU_STEMMER: std::sync::OnceLock<rust_stemmers::Stemmer> = std::sync::OnceLock::new();
+    static EN_STEMMER: std::sync::OnceLock<rust_stemmers::Stemmer> = std::sync::OnceLock::new();
+
+    let ru = RU_STEMMER.get_or_init(|| rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::Russian));
+    let en = EN_STEMMER.get_or_init(|| rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English));
+
+    let word_lower = word.to_lowercase();
+    let has_cyrillic = word_lower.chars().any(|c| ('а'..='я').contains(&c) || c == 'ё');
+    if has_cyrillic {
+        if word_lower.chars().count() <= 4 {
+            word_lower
+        } else {
+            ru.stem(&word_lower).to_string()
+        }
+    } else {
+        en.stem(&word_lower).to_string()
+    }
+}
+
+/// Applies a score boost to search results for exact keyword query term matches.
 pub fn apply_term_boost(results: &mut Vec<SearchResult>, query: &str, term_boost_weight: f32) {
     let query_lower = query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
     if !query_terms.is_empty() {
-        let stopwords: std::collections::HashSet<&str> = crate::constants::STOPWORDS.iter().cloned().collect();
+        let stopwords = crate::constants::get_stopwords();
 
-        for r in results.iter_mut() {
-            if let Some(ref text) = r.text {
-                let text_lower = text.to_lowercase();
-                let text_words: Vec<&str> = text_lower
-                    .split(|c: char| !c.is_alphanumeric())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+        let query_stemmed: Vec<String> = query_terms
+            .iter()
+            .filter(|term| term.chars().count() > 1 && !stopwords.contains(**term))
+            .map(|term| stem_word(*term))
+            .collect();
 
-                let mut matches_count = 0;
-                for term in &query_terms {
-                    if term.chars().count() > 1 && !stopwords.contains(term) {
-                        if text_words.contains(term) {
+        if !query_stemmed.is_empty() {
+            for r in results.iter_mut() {
+                if let Some(ref text) = r.text {
+                    let text_lower = text.to_lowercase();
+                    let text_words = text_lower
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|s| !s.is_empty());
+
+                    let text_stemmed: std::collections::HashSet<String> = text_words
+                        .map(|w| stem_word(w))
+                        .collect();
+
+                    let mut matches_count = 0;
+                    for stemmed_term in &query_stemmed {
+                        if text_stemmed.contains(stemmed_term) {
                             matches_count += 1;
                         }
                     }
-                }
-                if matches_count > 0 {
-                    let boost = (matches_count as f32 * term_boost_weight).min(0.5);
-                    r.score += boost;
-                    if let Some(ref mut dbg) = r.debug {
-                        dbg.term_boost = boost;
-                    } else {
-                        r.debug = Some(ScoreDebug {
-                            bm25_rank: None,
-                            vector_rank: None,
-                            rrf_score: 0.0,
-                            term_boost: boost,
-                            rerank_score: None,
-                        });
+
+                    if matches_count > 0 {
+                        let boost = (matches_count as f32 * term_boost_weight).min(0.5);
+                        r.score += boost;
+                        if let Some(ref mut dbg) = r.debug {
+                            dbg.term_boost = boost;
+                        } else {
+                            r.debug = Some(ScoreDebug {
+                                bm25_rank: None,
+                                vector_rank: None,
+                                rrf_score: 0.0,
+                                term_boost: boost,
+                                rerank_score: None,
+                            });
+                        }
                     }
                 }
             }
+            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         }
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     }
 }
 
@@ -203,5 +234,31 @@ mod tests {
         assert_eq!(results[1].score, 0.0);
         assert!(results[1].debug.is_none() || results[1].debug.as_ref().unwrap().term_boost == 0.0);
     }
+
+    #[test]
+    fn test_apply_term_boost_stemming() {
+        // Test case 1: long Russian words
+        let mut results = vec![
+            make_result(1, 0, "исследование структуры компьютеров"),
+            make_result(2, 0, "просто другой текст"),
+        ];
+        apply_term_boost(&mut results, "компьютер структура", 0.1);
+        assert!(results[0].score > 0.0);
+        let debug = results[0].debug.as_ref().unwrap();
+        assert!((debug.term_boost - 0.2).abs() < 1e-5);
+
+        // Test case 2: short Russian words (avoiding over-stemming like атом -> ат)
+        let mut results2 = vec![
+            make_result(1, 0, "исследование структуры атомов и молекул"),
+            make_result(2, 0, "просто другой текст"),
+        ];
+        apply_term_boost(&mut results2, "атом молекула", 0.1);
+        assert!(results2[0].score > 0.0);
+        let debug2 = results2[0].debug.as_ref().unwrap();
+        // "атом" -> "атом", "атомов" -> "атом" (matched!)
+        // "молекула" -> "молекул", "молекул" -> "молекул" (matched!)
+        assert!((debug2.term_boost - 0.2).abs() < 1e-5);
+    }
 }
+
 
