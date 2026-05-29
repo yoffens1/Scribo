@@ -12,6 +12,7 @@
     "distribute": "cargo run --manifest-path src-tauri/Cargo.toml -- distribute",
     "chunk:inbox": "cargo run --manifest-path src-tauri/Cargo.toml -- chunk-file",
     "calibrate": "cargo run --manifest-path src-tauri/Cargo.toml --release -- calibrate",
+    "query": "cargo run --manifest-path src-tauri/Cargo.toml --release -- query",
     "bench:chunker": "cargo bench --manifest-path src-tauri/Cargo.toml --bench chunker_bench",
     "test:chunker:rs": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests",
     "test:chunker:rs:embedding": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests embedding",
