@@ -7,6 +7,8 @@ use crate::constants::*;
 pub fn resolve_config(state: &DbState, query: &str, config: &RetrievalConfig) -> RetrievalConfig {
     let mut resolved_config = config.clone();
 
+    let word_count = query.split_whitespace().count();
+
     // 0. Load calibrated settings from DB meta table if not explicitly provided in config
     let (db_emb_weight, db_rrf_k, db_term_boost) = state.with_conn(|conn| {
         let emb_w = meta::get_f32(conn, "retrieval_embedding_weight")?;
@@ -16,7 +18,13 @@ pub fn resolve_config(state: &DbState, query: &str, config: &RetrievalConfig) ->
     }).unwrap_or((None, None, None));
 
     if resolved_config.embedding_weight.is_none() {
-        resolved_config.embedding_weight = db_emb_weight;
+        let base_emb_weight = db_emb_weight.unwrap_or(DEFAULT_EMBEDDING_WEIGHT);
+        let adaptive_emb_weight = if word_count <= 3 {
+            base_emb_weight * 1.5
+        } else {
+            base_emb_weight
+        };
+        resolved_config.embedding_weight = Some(adaptive_emb_weight);
     }
     if resolved_config.tuning.is_none() {
         let mut tuning = RetrievalTuning::default();
@@ -33,7 +41,6 @@ pub fn resolve_config(state: &DbState, query: &str, config: &RetrievalConfig) ->
     }
 
     // 0.5. Resolve default pipeline and LLM config if preprocessing/reranking is needed
-    let word_count = query.split_whitespace().count();
     if resolved_config.pipeline.is_none() {
         resolved_config.pipeline = Some(PipelineConfig {
             auto_translate: Some(true),

@@ -81,12 +81,7 @@ pub fn apply_term_boost(results: &mut Vec<SearchResult>, query: &str, term_boost
     let query_lower = query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
     if !query_terms.is_empty() {
-        let stopwords: std::collections::HashSet<&str> = [
-            // English stopwords
-            "what", "is", "are", "the", "a", "an", "and", "or", "in", "of", "to", "for", "with", "on", "at", "by", "from", "this", "that", "it", "you", "we", "they", "how", "why", "which",
-            // Russian stopwords
-            "что", "как", "это", "и", "в", "на", "с", "ли", "или", "но", "а", "для", "по", "из", "от", "до", "при", "к", "у", "о", "об", "же", "бы", "вы", "мы", "они"
-        ].iter().cloned().collect();
+        let stopwords: std::collections::HashSet<&str> = crate::constants::STOPWORDS.iter().cloned().collect();
 
         for r in results.iter_mut() {
             if let Some(ref text) = r.text {

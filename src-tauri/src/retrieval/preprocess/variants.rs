@@ -41,6 +41,42 @@ pub fn dedup_variants(variants: Vec<QueryVariant>) -> Vec<QueryVariant> {
     seen.into_values().collect()
 }
 
+fn rewrite_question_query(query: &str) -> Option<String> {
+    let query_lower = query.to_lowercase();
+    let prefixes = [
+        // English question patterns
+        "what is ",
+        "what are ",
+        "how does ",
+        "how to ",
+        "explain ",
+        "tell me about ",
+        // Russian question patterns
+        "что такое ",
+        "что это ",
+        "как работает ",
+        "как устроена ",
+        "как устроены ",
+        "как сделать ",
+        "расскажи про ",
+        "расскажи о ",
+        "объясни ",
+        "что означает ",
+        "что значит ",
+    ];
+
+    for prefix in &prefixes {
+        if query_lower.starts_with(prefix) {
+            let stripped = &query[prefix.len()..];
+            let trimmed = stripped.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Builds the full list of weighted [`QueryVariant`]s from the original query.
 ///
 /// Runs translation, HyDE, and synonym expansion stages in order,
@@ -63,6 +99,16 @@ pub async fn build_variants(
         weight: 1.0,
         vector_only: false,
     }];
+
+    if let Some(rewritten) = rewrite_question_query(query) {
+        variants.push(QueryVariant {
+            text: rewritten,
+            lang: detected_lang.to_string(),
+            source: VariantSource::Original,
+            weight: 0.9,
+            vector_only: false,
+        });
+    }
 
     // 1. Translation Stage
     let auto_translate = pipeline.and_then(|p| p.auto_translate).unwrap_or(false);
