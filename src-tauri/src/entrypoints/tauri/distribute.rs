@@ -97,7 +97,7 @@ pub async fn distribute_apply_plan(
             let payload = crate::services::indexer::IndexingPayload {
                 note_id,
                 embedding_model: &llm_config.model,
-                embedding_dim: 384,
+                embedding_dim: crate::constants::EMBEDDING_DIM as u32,
                 indexing_version: "1",
             };
             

@@ -75,7 +75,8 @@ impl ReindexScheduler {
 
                                 if let Ok(true) = needs_indexing {
                                     // Infer embedding dimension from model name heuristic.
-                                    let dim = if model.contains("granite") { 384 } else { 1536 };
+                                    // Use centralized constant — avoids stale heuristics when the model changes.
+                                    let dim = crate::constants::EMBEDDING_DIM as u32;
                                     let payload = crate::services::indexer::IndexingPayload {
                                         note_id,
                                         embedding_model: &model,

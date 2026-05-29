@@ -4,8 +4,8 @@
 //! used across the hybrid retrieval pipeline, indexer, and AI services.
 
 // ── Embedding model configuration ──
-pub const EMBEDDING_MODEL: &str = "granite-embedding-97M-multilingual-r2-BF16";
-pub const EMBEDDING_DIM: usize = 384;
+pub const EMBEDDING_MODEL: &str = "multilingual-e5-large-instruct-F16";
+pub const EMBEDDING_DIM: usize = 1024;
 pub const EMBEDDING_CTX: usize = 2048;        // n_ctx context window
 pub const INDEXING_VERSION: &str = "1";
 

@@ -144,7 +144,7 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
                     let payload = crate::services::indexer::IndexingPayload {
                         note_id: id,
                         embedding_model: &llm_config.model,
-                        embedding_dim: 384,
+                        embedding_dim: crate::constants::EMBEDDING_DIM as u32,
                         indexing_version: "1",
                     };
                     if let Err(e) = crate::services::indexer::persist_indexed_file(conn, payload) {
