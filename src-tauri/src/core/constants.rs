@@ -48,14 +48,6 @@ pub fn get_stopwords() -> &'static std::collections::HashSet<String> {
         for w in stop_words::get(stop_words::LANGUAGE::Russian) {
             set.insert(w.to_lowercase());
         }
-        // extra custom Russian question/stop words
-        let extra = [
-            "такое", "это", "как", "почему", "зачем", "какой", "какая", "какие",
-            "является", "означает", "значит", "дай", "расскажи", "объясни", "что"
-        ];
-        for w in &extra {
-            set.insert(w.to_string());
-        }
         set
     })
 }
