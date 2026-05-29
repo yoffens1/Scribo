@@ -11,6 +11,7 @@
     "import:inbox": "cargo run --manifest-path src-tauri/Cargo.toml -- import-dir /home/yoffens/obsidian2026/1-INBOX/",
     "distribute": "cargo run --manifest-path src-tauri/Cargo.toml -- distribute",
     "chunk:inbox": "cargo run --manifest-path src-tauri/Cargo.toml -- chunk-file",
+    "calibrate": "cargo run --manifest-path src-tauri/Cargo.toml --release -- calibrate",
     "bench:chunker": "cargo bench --manifest-path src-tauri/Cargo.toml --bench chunker_bench",
     "test:chunker:rs": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests",
     "test:chunker:rs:embedding": "cargo test --manifest-path src-tauri/Cargo.toml --test chunker_tests embedding",
