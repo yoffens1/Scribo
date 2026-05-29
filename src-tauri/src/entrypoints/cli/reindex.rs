@@ -7,7 +7,7 @@ use crate::ai::embedding::Embedder;
 use crate::ai::types::EmbedderConfig;
 use crate::services::reindex::{find_stale_notes, mark_stale_for_model_change};
 use crate::services::indexer::{persist_indexed_file, IndexingPayload};
-use crate::cli::query::make_state;
+use crate::entrypoints::cli::query::make_state;
 
 const CURRENT_MODEL: &str = crate::constants::EMBEDDING_MODEL;
 const CURRENT_DIM: i64 = crate::constants::EMBEDDING_DIM as i64;

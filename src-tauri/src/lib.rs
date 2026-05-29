@@ -6,8 +6,7 @@
 //! It also houses the main entry point to register commands and run the Tauri application.
 
 pub mod core;
-pub mod commands;
-pub mod cli;
+pub mod entrypoints;
 pub mod domain;
 pub mod services;
 pub mod fragmenter;
@@ -15,6 +14,9 @@ pub mod db;
 pub mod ai;
 pub mod retrieval;
 pub mod logging;
+
+pub use crate::entrypoints::cli;
+pub use crate::entrypoints::tauri as commands;
 
 pub use crate::core::{constants, lang, error};
 pub use crate::core::error::AppError;
