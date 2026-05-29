@@ -62,7 +62,7 @@ impl Retriever for VectorRetriever {
         let options = RetrieveOptions {
             top_k: Some(10),
             target_level: Some(0), // Search section-level chunks, not leaf fragments.
-            filters: None,
+            ..Default::default()
         };
 
         // 3. Execute unified retrieve pipeline.

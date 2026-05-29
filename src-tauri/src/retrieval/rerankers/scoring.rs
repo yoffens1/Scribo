@@ -61,7 +61,19 @@ pub async fn rerank_scoring(
                     // Apply normalised scores; unscored candidates keep their old score.
                     for (i, c) in candidates.iter_mut().enumerate() {
                         if let Some(&score) = score_map.get(&i) {
-                            c.score = score / max_score;
+                            let norm_score = score / max_score;
+                            c.score = norm_score;
+                            if let Some(ref mut dbg) = c.debug {
+                                dbg.rerank_score = Some(norm_score);
+                            } else {
+                                c.debug = Some(crate::retrieval::types::ScoreDebug {
+                                    bm25_rank: None,
+                                    vector_rank: None,
+                                    rrf_score: 0.0,
+                                    term_boost: 0.0,
+                                    rerank_score: Some(norm_score),
+                                });
+                            }
                         }
                     }
                     candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));

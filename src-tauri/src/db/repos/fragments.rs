@@ -473,3 +473,18 @@ pub fn vector_search(
 
     Ok(final_results)
 }
+
+/// Fetches up to `limit` clean fragment texts to detect the dominant vault language.
+pub fn get_sample_texts(conn: &Connection, limit: i64) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT clean_text FROM chunks 
+         WHERE level = 1 AND clean_text IS NOT NULL AND clean_text != ''
+         LIMIT ?"
+    )?;
+    let rows = stmt.query_map([limit], |row| row.get::<_, String>(0))?;
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r?);
+    }
+    Ok(res)
+}

@@ -59,7 +59,19 @@ pub async fn rerank_listwise(
                         if orig_idx < candidates.len() {
                             let mut item = candidates[orig_idx].clone();
                             // Score decays linearly: rank 0 → 1.0, rank n-1 → ~0.0.
-                            item.score = 1.0 - (rank as f32 / parsed.order.len() as f32);
+                            let new_score = 1.0 - (rank as f32 / parsed.order.len() as f32);
+                            item.score = new_score;
+                            if let Some(ref mut dbg) = item.debug {
+                                dbg.rerank_score = Some(new_score);
+                            } else {
+                                item.debug = Some(crate::retrieval::types::ScoreDebug {
+                                    bm25_rank: None,
+                                    vector_rank: None,
+                                    rrf_score: 0.0,
+                                    term_boost: 0.0,
+                                    rerank_score: Some(new_score),
+                                });
+                            }
                             reranked.push(item);
                         }
                     }

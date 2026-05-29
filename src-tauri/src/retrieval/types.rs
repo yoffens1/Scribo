@@ -125,8 +125,8 @@ pub struct RetrievalTuning {
     /// Hard cap on the internal over-fetch count regardless of `top_k`. Default: 50.
     pub over_fetch_cap: usize,
     /// RRF smoothing constant `k`. Higher values reduce the impact of top ranks.
-    /// Empirically 60 works well for most corpora. Default: 60.0.
-    pub rrf_k: f32,
+    /// Empirically 60 works well for most corpora. Default: None (which falls back to 60.0 or DB).
+    pub rrf_k: Option<f32>,
     /// Pool size multiplier for reranking (`candidates = top_k * multiplier`). Default: 4.
     pub rerank_pool_multiplier: usize,
     /// Relevance weight for HyDE variants in the final RRF fusion. Default: 0.8.
@@ -143,7 +143,7 @@ impl Default for RetrievalTuning {
         Self {
             over_fetch_multiplier: 3,
             over_fetch_cap: 50,
-            rrf_k: 60.0,
+            rrf_k: None,
             rerank_pool_multiplier: 4,
             hyde_weight: 0.8,
             synonym_weight: 0.6,
@@ -189,6 +189,17 @@ pub struct FragmentRef {
     pub fragment_index: i64,
 }
 
+/// Detailed breakdown of scores for a single search result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScoreDebug {
+    pub bm25_rank: Option<usize>,
+    pub vector_rank: Option<usize>,
+    pub rrf_score: f32,
+    pub term_boost: f32,
+    pub rerank_score: Option<f32>,
+}
+
 /// A single ranked search hit returned to the caller.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,6 +211,11 @@ pub struct SearchResult {
     pub score: f32,
     /// Clean text of the fragment. Populated directly by SQL JOINs — no separate hydration needed.
     pub text: Option<String>,
+    /// Title of the parent note.
+    pub note_title: Option<String>,
+    /// Detailed score breakdown, populated if `explain` option is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<ScoreDebug>,
 }
 
 /// Post-retrieval filter criteria.
@@ -211,7 +227,7 @@ pub struct RetrieveFilters {
 }
 
 /// Options controlling the retrieval call.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RetrieveOptions {
     /// Number of final results to return. Default: 5.
@@ -221,6 +237,10 @@ pub struct RetrieveOptions {
     /// Restrict vector search to a specific chunk level.
     /// Level 1 = leaf fragments; higher levels = merged/grouped chunks.
     pub target_level: Option<i64>,
+    /// Enable detailed scoring breakdown inside each SearchResult's debug field.
+    pub explain: Option<bool>,
+    /// Cut off any results below a percentage of the best result score.
+    pub min_score_ratio: Option<f32>,
 }
 
 // ─── Fetch types (raw dump, not ranked) ──────────────────────────────────────

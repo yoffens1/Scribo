@@ -35,6 +35,9 @@
 //! This enables [`cosine_similarity_normalized`](crate::ai::cosine_similarity_normalized)
 //! (dot product only, ~2× faster) to be used safely in the vector search hot path.
 
+pub const CURRENT_EMBEDDING_MODEL: &str = crate::constants::EMBEDDING_MODEL;
+pub const CURRENT_DIM: i64 = crate::constants::EMBEDDING_DIM as i64;
+
 pub mod provider;
 pub mod openai;
 pub mod local;

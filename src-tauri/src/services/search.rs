@@ -69,10 +69,6 @@ pub async fn run_retrieval_query(
     options: Option<RetrieveOptions>,
     state: &DbState,
 ) -> Result<Vec<RetSearchResult>, AppError> {
-    let opts = options.unwrap_or(RetrieveOptions {
-        top_k: None,
-        filters: None,
-        target_level: None,
-    });
+    let opts = options.unwrap_or_default();
     retrieve(state, &query, query_embedding.as_deref(), &config, &opts).await
 }

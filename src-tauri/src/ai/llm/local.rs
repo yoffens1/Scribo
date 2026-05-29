@@ -80,7 +80,7 @@ impl LocalLlm {
         prompt.push_str("<|im_start|>assistant\n");
 
         let backend = crate::ai::models::manager::get_backend()?;
-        let ctx_params = LlamaContextParams::default().with_n_ctx(Some(std::num::NonZeroU32::new(2048).unwrap()));
+        let ctx_params = LlamaContextParams::default().with_n_ctx(Some(std::num::NonZeroU32::new(crate::constants::EMBEDDING_CTX as u32).unwrap()));
         let mut ctx = self.model.new_context(backend, ctx_params).map_err(|e| e.to_string())?;
 
         let tokens_list = self.model.str_to_token(&prompt, AddBos::Always).map_err(|e| e.to_string())?;
@@ -98,7 +98,7 @@ impl LocalLlm {
         
         let mut sampler = LlamaSampler::greedy();
         let mut n_cur = batch.n_tokens();
-        let target = batch.n_tokens() + max_tokens.unwrap_or(2048) as i32;
+        let target = batch.n_tokens() + max_tokens.unwrap_or(crate::constants::DEFAULT_LLM_MAX_TOKENS) as i32;
 
         while n_cur < target {
             let new_token = sampler.sample(&ctx, batch.n_tokens() - 1);
@@ -128,15 +128,15 @@ impl LocalLlm {
     pub fn embed_sync(&self, text: &str) -> Result<Vec<f32>, String> {
         let backend = crate::ai::models::manager::get_backend()?;
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(std::num::NonZeroU32::new(2048).unwrap()))
-            .with_n_batch(2048)
-            .with_n_ubatch(2048)
+            .with_n_ctx(Some(std::num::NonZeroU32::new(crate::constants::EMBEDDING_CTX as u32).unwrap()))
+            .with_n_batch(crate::constants::EMBEDDING_CTX as u32)
+            .with_n_ubatch(crate::constants::EMBEDDING_CTX as u32)
             .with_embeddings(true);
         let mut ctx = self.model.new_context(backend, ctx_params).map_err(|e| e.to_string())?;
 
         let mut tokens_list = self.model.str_to_token(text, AddBos::Always).map_err(|e| e.to_string())?;
-        if tokens_list.len() > 2048 {
-            tokens_list.truncate(2048);
+        if tokens_list.len() > crate::constants::EMBEDDING_CTX {
+            tokens_list.truncate(crate::constants::EMBEDDING_CTX);
         }
 
         let mut batch = LlamaBatch::new(tokens_list.len(), 1);

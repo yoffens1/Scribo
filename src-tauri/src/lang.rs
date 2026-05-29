@@ -1,8 +1,7 @@
-//! Language detection utilities for the retrieval pipeline.
+//! General language detection utilities.
 //!
 //! Wraps the `whatlang` crate and maps its internal [`Lang`] enum to compact
-//! ISO-639-1 two-letter codes used throughout the retrieval system.
-//! Unknown or unsupported languages default to `"en"`.
+//! ISO-639-1 two-letter codes. Unknown or unsupported languages default to `"en"`.
 
 use whatlang::{detect, Lang};
 
@@ -43,4 +42,33 @@ pub fn is_english(text: &str) -> bool {
     } else {
         false
     }
+}
+
+/// Picks the dominant language from a set of texts.
+/// Uses MIN_TEXT_LEN_FOR_LANG (from constants) to skip too-short snippets.
+pub fn pick_dominant_language(texts: &[String]) -> String {
+    use std::collections::HashMap;
+    if texts.is_empty() {
+        return "en".to_string();
+    }
+
+    let mut counts = HashMap::new();
+    for text in texts {
+        if text.trim().len() < crate::constants::MIN_TEXT_LEN_FOR_LANG {
+            continue;
+        }
+        if let Some(lang) = detect_language(text) {
+            *counts.entry(lang).or_insert(0) += 1;
+        }
+    }
+
+    let mut best_lang = "en".to_string();
+    let mut max_count = 0;
+    for (l, c) in counts {
+        if c > max_count {
+            max_count = c;
+            best_lang = l;
+        }
+    }
+    best_lang
 }

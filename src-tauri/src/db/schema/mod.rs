@@ -48,10 +48,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v15");
+        println!("Init: fresh database, creating all tables directly at v17");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '15')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '17')",
             [],
         )?;
         conn.execute(
@@ -492,9 +492,41 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             version = "15".to_string();
         }
 
-        if version != "15" {
+        if version == "15" {
+            println!("Init: upgrading database from v15 to v16 (calibration table)");
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS retrieval_calibration (
+                    calibration_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query                TEXT NOT NULL,
+                    expected_note_title  TEXT NOT NULL,
+                    relevance_weight     REAL NOT NULL DEFAULT 1.0,
+                    UNIQUE(query, expected_note_title)
+                );
+                UPDATE meta SET value = '16' WHERE key = 'schema_version';"
+            )?;
+            version = "16".to_string();
+        }
+
+        if version == "16" {
+            println!("Init: upgrading database from v16 to v17 (llm_cache table)");
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS llm_cache (
+                    query             TEXT NOT NULL,
+                    model_id          TEXT NOT NULL,
+                    cache_type        TEXT NOT NULL CHECK (cache_type IN ('hyde', 'translation')),
+                    target_lang       TEXT NOT NULL,
+                    cached_response   TEXT NOT NULL,
+                    created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    PRIMARY KEY (query, model_id, cache_type, target_lang)
+                );
+                UPDATE meta SET value = '17' WHERE key = 'schema_version';"
+            )?;
+            version = "17".to_string();
+        }
+
+        if version != "17" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 15", version
+                "Unsupported database version: got {}, expected 17", version
             )));
         }
     }

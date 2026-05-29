@@ -23,7 +23,7 @@ pub fn handle_import_dir(conn: &mut Connection, dir_path_str: &str) {
     rt.block_on(async {
         let embedder_config = crate::ai::types::EmbedderConfig {
             provider: "local".to_string(),
-            model: Some("granite-embedding-97M-multilingual-r2-BF16".to_string()),
+            model: Some(crate::constants::EMBEDDING_MODEL.to_string()),
             api_key: None,
             base_url: None,
         };
@@ -52,9 +52,9 @@ pub fn handle_import_dir(conn: &mut Connection, dir_path_str: &str) {
 
             let payload = crate::services::indexer::IndexingPayload {
                 note_id: note_id.0,
-                embedding_model: "granite-embedding-97M-multilingual-r2-BF16",
-                embedding_dim: 384,
-                indexing_version: "1",
+                embedding_model: crate::constants::EMBEDDING_MODEL,
+                embedding_dim: crate::constants::EMBEDDING_DIM as u32,
+                indexing_version: crate::constants::INDEXING_VERSION,
             };
 
             if let Err(e) = crate::services::indexer::persist_indexed_file(conn, payload) {

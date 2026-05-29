@@ -9,9 +9,9 @@ use crate::services::reindex::{find_stale_notes, mark_stale_for_model_change};
 use crate::services::indexer::{persist_indexed_file, IndexingPayload};
 use crate::cli::query::make_state;
 
-const CURRENT_MODEL: &str = "granite-embedding-97M-multilingual-r2-BF16";
-const CURRENT_DIM: i64 = 384;
-const INDEXING_VERSION: &str = "1";
+const CURRENT_MODEL: &str = crate::constants::EMBEDDING_MODEL;
+const CURRENT_DIM: i64 = crate::constants::EMBEDDING_DIM as i64;
+const INDEXING_VERSION: &str = crate::constants::INDEXING_VERSION;
 
 pub fn handle_reindex(db_path: &Path, force: bool) {
     let state = match make_state(db_path) {

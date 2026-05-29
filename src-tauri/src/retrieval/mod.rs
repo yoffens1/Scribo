@@ -34,13 +34,18 @@
 //! - [`rerankers`] — Post-fusion LLM reranking: scoring and listwise.
 //! - [`pipeline`]  — Central orchestrator that drives the full retrieval flow.
 
-pub mod language;
 pub mod types;
 pub mod fusion;
 pub mod stages;
 pub mod rerankers;
 pub mod pipeline;
+pub mod config_resolver;
+pub mod cache;
+pub mod context;
+pub mod calibration;
 
-pub use language::{detect_language, is_english};
+
+
 pub use types::{RetrievalConfig, SearchResult, RetrieveOptions, RetrieveFilters, FetchQuery, FetchResult};
-pub use pipeline::{retrieve, fetch};
+pub use pipeline::{retrieve, fetch, embed_query};
+pub use calibration::{EvalSample, mean_reciprocal_rank, grid_search, calibrate_min_score};

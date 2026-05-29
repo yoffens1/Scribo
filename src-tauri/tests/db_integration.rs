@@ -158,8 +158,7 @@ mod tests {
         };
         let options = RetrieveOptions {
             top_k: Some(1),
-            filters: None,
-            target_level: None,
+            ..Default::default()
         };
 
         let query_res = retrieve(&db_state, "knowledge management", None, &config, &options).await.unwrap();
@@ -287,7 +286,7 @@ mod tests {
         // 2. Initialize the local embedder with the user's granite model
         let embedder_config = scribo_lib::ai::types::EmbedderConfig {
             provider: "local".to_string(),
-            model: Some("granite-embedding-97M-multilingual-r2-BF16".to_string()),
+            model: Some(scribo_lib::ai::embedding::CURRENT_EMBEDDING_MODEL.to_string()),
             api_key: None,
             base_url: None,
         };
@@ -325,8 +324,8 @@ mod tests {
             db_state.with_write(|conn| {
                 let payload = scribo_lib::services::indexer::IndexingPayload {
                     note_id: note_id.0,
-                    embedding_model: "granite-embedding-97M-multilingual-r2-BF16",
-                    embedding_dim: 384,
+                    embedding_model: scribo_lib::ai::embedding::CURRENT_EMBEDDING_MODEL,
+                    embedding_dim: scribo_lib::ai::embedding::CURRENT_DIM as u32,
                     indexing_version: "1",
                 };
                 scribo_lib::services::indexer::persist_indexed_file(conn, payload)

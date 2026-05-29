@@ -295,6 +295,24 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           );
 
           CREATE INDEX IF NOT EXISTS idx_chunk_tags_tag ON chunk_tags(tag_id);
+
+          CREATE TABLE IF NOT EXISTS retrieval_calibration (
+              calibration_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+              query                TEXT NOT NULL,
+              expected_note_title  TEXT NOT NULL,
+              relevance_weight     REAL NOT NULL DEFAULT 1.0,
+              UNIQUE(query, expected_note_title)
+          );
+
+          CREATE TABLE IF NOT EXISTS llm_cache (
+              query             TEXT NOT NULL,
+              model_id          TEXT NOT NULL,
+              cache_type        TEXT NOT NULL CHECK (cache_type IN ('hyde', 'translation')),
+              target_lang       TEXT NOT NULL,
+              cached_response   TEXT NOT NULL,
+              created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+              PRIMARY KEY (query, model_id, cache_type, target_lang)
+          );
          "
     )?;
     Ok(())

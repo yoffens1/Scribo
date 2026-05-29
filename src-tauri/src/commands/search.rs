@@ -4,7 +4,8 @@
 
 use crate::services::search::{FuzzySearch, SearchHit, run_retrieval_query};
 use crate::ai::{LlmConfig, LlmService, Translator};
-use crate::retrieval::{detect_language, is_english, fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
+use crate::retrieval::{fetch, RetrievalConfig, SearchResult as RetSearchResult, RetrieveOptions, FetchQuery, FetchResult};
+use crate::lang::{detect_language, is_english};
 use crate::error::AppError;
 use crate::db::DbState;
 use tauri::State;

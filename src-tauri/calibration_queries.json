@@ -1,0 +1,347 @@
+[
+  {
+    "query": "что такое атом",
+    "expectedNoteTitle": "Atom",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "какое строение у атома",
+    "expectedNoteTitle": "Atom",
+    "relevanceWeight": 0.9
+  },
+  {
+    "query": "what is an atom",
+    "expectedNoteTitle": "Atom",
+    "relevanceWeight": 0.88
+  },
+  {
+    "query": "что такое ион",
+    "expectedNoteTitle": "Ion",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "ионизация газов и веществ",
+    "expectedNoteTitle": "ионизация",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "как образуется химическая связь",
+    "expectedNoteTitle": "chemical bonds",
+    "relevanceWeight": 0.95
+  },
+  {
+    "query": "chemical bonds between atoms",
+    "expectedNoteTitle": "chemical bonds",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "что такое молекула",
+    "expectedNoteTitle": "Molecule",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "smallest particle of a substance properties",
+    "expectedNoteTitle": "Molecule",
+    "relevanceWeight": 0.9
+  },
+  {
+    "query": "отрицательный заряд частица атома",
+    "expectedNoteTitle": "Electron",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "what is electron",
+    "expectedNoteTitle": "Electron",
+    "relevanceWeight": 0.88
+  },
+  {
+    "query": "положительно заряженная частица ядра",
+    "expectedNoteTitle": "Proton",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "нейтральная частица в ядре",
+    "expectedNoteTitle": "Neutron",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "разновидности атомов с разным числом нейтронов",
+    "expectedNoteTitle": "Isotope",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "способность атома образовывать связи",
+    "expectedNoteTitle": "Valence",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "отдача электронов окисление",
+    "expectedNoteTitle": "Oxidation",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "приобретение электронов восстановление",
+    "expectedNoteTitle": "Reduction",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "вещество ускоряет реакцию не расходуется",
+    "expectedNoteTitle": "Catalyst",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "химическое соединение",
+    "expectedNoteTitle": "Compound",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "совокупность атомов с одинаковым зарядом ядра",
+    "expectedNoteTitle": "Element",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "периодическая таблица элементов",
+    "expectedNoteTitle": "Periodic Table",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "обобществление электронных пар связь",
+    "expectedNoteTitle": "Covalent Bond",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "притяжение противоположно заряженных ионов",
+    "expectedNoteTitle": "Ionic Bond",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "связь в металлах свободные электроны",
+    "expectedNoteTitle": "Metallic Bond",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "способность притягивать электроны в связи",
+    "expectedNoteTitle": "Electronegativity",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "шкала кислотности раствора",
+    "expectedNoteTitle": "pH Scale",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "химическое соединение отдает протоны H+",
+    "expectedNoteTitle": "Acid",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "принимает протоны отдает OH-",
+    "expectedNoteTitle": "Base",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "единица количества вещества число Авогадро",
+    "expectedNoteTitle": "Mole",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "переменная в программе память",
+    "expectedNoteTitle": "Variable",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "блок кода вызываемый многократно",
+    "expectedNoteTitle": "Function",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "массив упорядоченная коллекция элементов по индексу",
+    "expectedNoteTitle": "Array",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "цикл for while",
+    "expectedNoteTitle": "Loop",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "условный оператор if else",
+    "expectedNoteTitle": "Conditional",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "шаблон для создания объектов ооп класс",
+    "expectedNoteTitle": "Class",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "экземпляр класса объект",
+    "expectedNoteTitle": "Object",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "дочерний класс наследует родительский",
+    "expectedNoteTitle": "Inheritance",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "один интерфейс разные типы полиморфизм",
+    "expectedNoteTitle": "Polymorphism",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "сокрытие внутренней реализации объекта",
+    "expectedNoteTitle": "Encapsulation",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "последовательность шагов для решения задачи алгоритм",
+    "expectedNoteTitle": "Algorithm",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "функция вызывает саму себя",
+    "expectedNoteTitle": "Recursion",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "application programming interface правила взаимодействия",
+    "expectedNoteTitle": "API",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "организованная коллекция структурированных данных",
+    "expectedNoteTitle": "Database",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "structured query language управление реляционной бд",
+    "expectedNoteTitle": "SQL",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "распределенная система контроля версий",
+    "expectedNoteTitle": "Git",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "поиск и исправление багов отладка",
+    "expectedNoteTitle": "Debugging",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "нарушение хода программы исключение",
+    "expectedNoteTitle": "Exception",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "асинхронное программирование не блокировать поток",
+    "expectedNoteTitle": "Asynchronous",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "готовая структура и инструменты разработки фреймворк",
+    "expectedNoteTitle": "Framework",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "число без дробной части целое",
+    "expectedNoteTitle": "Integer",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "числитель и знаменатель дробь",
+    "expectedNoteTitle": "Fraction",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "делится только на один и самого себя простое",
+    "expectedNoteTitle": "Prime Number",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "математическое равенство с неизвестными уравнение",
+    "expectedNoteTitle": "Equation",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "соответствие между элементами множеств",
+    "expectedNoteTitle": "Function",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "скорость изменения функции производная",
+    "expectedNoteTitle": "Derivative",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "площадь под графиком функции интеграл",
+    "expectedNoteTitle": "Integral",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "прямоугольная таблица чисел строки столбцы матрица",
+    "expectedNoteTitle": "Matrix",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "величина и направление математический объект вектор",
+    "expectedNoteTitle": "Vector",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "значение к которому стремится функция предел",
+    "expectedNoteTitle": "Limit",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "утверждение истинность которого доказана теорема",
+    "expectedNoteTitle": "Theorem",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "мера возможности наступления события вероятность",
+    "expectedNoteTitle": "Probability",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "сбор анализ интерпретация данных статистика",
+    "expectedNoteTitle": "Statistics",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "совокупность различных элементов множество",
+    "expectedNoteTitle": "Set",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "показатель степени в которую нужно возвести основание",
+    "expectedNoteTitle": "Logarithm",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "умножение основания самого на себя степень",
+    "expectedNoteTitle": "Exponent",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "сумма одночленов многочлен",
+    "expectedNoteTitle": "Polynomial",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "пространственные формы геометрия",
+    "expectedNoteTitle": "Geometry",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "соотношения углов и сторон в треугольнике тригонометрия",
+    "expectedNoteTitle": "Trigonometry",
+    "relevanceWeight": 1.0
+  },
+  {
+    "query": "неограниченно большая величина бесконечность",
+    "expectedNoteTitle": "Infinity",
+    "relevanceWeight": 1.0
+  }
+]

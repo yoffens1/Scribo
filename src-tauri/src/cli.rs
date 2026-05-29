@@ -13,6 +13,7 @@ pub mod fragment_file;
 pub mod distribute;
 pub mod query;
 pub mod reindex;
+pub mod calibration;
 
 /// Command line interface parser for Scribo.
 #[derive(Parser, Debug)]
@@ -94,6 +95,18 @@ enum Commands {
         /// Reindex everything, even up-to-date notes.
         #[arg(long)]
         force: bool,
+    },
+    /// Automatically optimize hybrid search parameters (RRF weight, k, min_score) on the evaluation dataset.
+    Calibrate,
+    /// Add an evaluation alias/target pair to the calibration dataset.
+    AddAlias {
+        /// The query to evaluate.
+        query: String,
+        /// The expected note title that should rank highly.
+        target: String,
+        /// Expected relevance score weight (0.0 to 1.0).
+        #[arg(short = 'r', long, default_value_t = 1.0)]
+        relevance: f32,
     },
 }
 
@@ -219,6 +232,12 @@ pub fn handle_cli(args: Vec<String>) {
         }
         Commands::Reindex { force } => {
             reindex::handle_reindex(&db_path, force);
+        }
+        Commands::Calibrate => {
+            calibration::handle_calibrate(&db_path);
+        }
+        Commands::AddAlias { query, target, relevance } => {
+            calibration::handle_add_alias(&db_path, &query, &target, relevance);
         }
     }
 }

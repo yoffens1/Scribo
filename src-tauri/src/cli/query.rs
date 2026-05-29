@@ -14,7 +14,7 @@ use crate::retrieval::{
     retrieve, RetrievalConfig, RetrieveOptions,
 };
 use crate::retrieval::types::{
-    RetrievalMode, PipelineConfig, AiRerankConfig, RerankMode, SynonymExpansion,
+    RetrievalMode, PipelineConfig, AiRerankConfig, RerankMode, SynonymExpansion, RetrieveFilters,
 };
 
 /// Builds a `DbState` whose pool already points at `db_path`,
@@ -55,8 +55,23 @@ pub fn handle_query(
         Err(e) => { eprintln!("Failed to open DB: {e}"); return; }
     };
 
-    const CURRENT_MODEL: &str = "granite-embedding-97M-multilingual-r2-BF16";
-    const CURRENT_DIM: i64 = 384;
+    let mut resolved_min_score = min_score;
+    if min_score == 0.005 {
+        if let Ok(db_min) = state.with_conn(|conn| {
+            let mut val_str: Option<String> = None;
+            if let Ok(mut stmt) = conn.prepare("SELECT value FROM meta WHERE key = 'retrieval_min_score'") {
+                val_str = stmt.query_row([], |row| row.get::<_, String>(0)).ok();
+            }
+            Ok(val_str)
+        }) {
+            if let Some(s) = db_min.and_then(|v| v.parse::<f32>().ok()) {
+                resolved_min_score = s;
+            }
+        }
+    }
+
+    const CURRENT_MODEL: &str = crate::constants::EMBEDDING_MODEL;
+    const CURRENT_DIM: i64 = crate::constants::EMBEDDING_DIM as i64;
 
     if let Ok(report) = crate::services::reindex::find_stale_notes(&state, CURRENT_MODEL, CURRENT_DIM) {
         if !report.stale_notes.is_empty() {
@@ -80,74 +95,52 @@ pub fn handle_query(
             _ => {
                 let embedder = Embedder::new(EmbedderConfig {
                     provider: "local".to_string(),
-                    model: Some("granite-embedding-97M-multilingual-r2-BF16".to_string()),
+                    model: Some(CURRENT_MODEL.to_string()),
                     api_key: None,
                     base_url: None,
                 });
                 match embedder.embed_query(query).await {
-                    Ok(v) => Some(v),
-                    Err(e) => { eprintln!("Embedding failed: {e}"); return; }
+                    Ok(emb) => Some(emb),
+                    Err(e) => {
+                        eprintln!("[query] WARNING: failed to embed query: {e}. Falling back to FTS5 only.");
+                        None
+                    }
                 }
             }
         };
 
-        // Resolve default LLM config if preprocessing/reranking is needed.
-        let llm_config = if hyde || rerank {
-            let models = crate::ai::models::scanner::scan_models();
-            if let Some(llm_model) = models.iter().find(|m| matches!(m.kind, crate::ai::models::scanner::ModelKind::Llm)) {
-                Some(crate::ai::LlmConfig {
-                    backend: "local".to_string(),
-                    model: llm_model.id.clone(),
-                    api_key: None,
-                    base_url: None,
-                    system_prompt: None,
-                    max_tokens: Some(2048),
-                    temperature: None,
-                    response_format: Some("json".to_string()),
-                })
-            } else if let Ok(or_key) = std::env::var("OPENROUTER_API_KEY") {
-                Some(crate::ai::LlmConfig {
-                    backend: "openai".to_string(),
-                    model: "google/gemini-2.5-flash".to_string(),
-                    api_key: Some(or_key),
-                    base_url: Some("https://openrouter.ai/api/v1".to_string()),
-                    system_prompt: None,
-                    max_tokens: None,
-                    temperature: None,
-                    response_format: Some("json".to_string()),
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // 2. Build config.
+        // 2. Set up retrieval config
         let config = RetrievalConfig {
             mode,
-            embedding_weight: Some(1.5), // Vector is more important than BM25 for short queries
+            embedding_weight: None, // Will load from DB calibrated value if calibrated
             pipeline: Some(PipelineConfig {
-                auto_translate: Some(true),
-                expand_synonyms: Some(if expand { SynonymExpansion::Static } else { SynonymExpansion::Off }),
+                auto_translate: Some(false),
+                expand_synonyms: Some(if expand {
+                    SynonymExpansion::Static
+                } else {
+                    SynonymExpansion::Off
+                }),
                 synonym_dict: None,
                 hyde: Some(hyde),
             }),
             ai_rerank: Some(AiRerankConfig {
                 enabled: rerank,
                 mode: Some(RerankMode::Listwise),
-                max_candidates: Some(20),
+                max_candidates: Some(25),
             }),
             vault_lang: None,
-            llm_config,
+            llm_config: None,
             adaptive_weights: None,
-            tuning: None,
+            tuning: None, // Will load from DB calibrated values if calibrated
         };
 
         let opts = RetrieveOptions {
-            top_k: Some(top_k.max(20)), // Overfetch, then filter and truncate
-            filters: None,
+            top_k: Some(top_k * 3), // fetch more for local filtering/reranking
+            filters: Some(RetrieveFilters {
+                note_id: None,
+            }),
             target_level: Some(1),
+            ..Default::default()
         };
 
         // 3. Run retrieval.
@@ -159,16 +152,16 @@ pub fn handle_query(
         // Hard threshold filter and truncate to top_k
         let filtered: Vec<_> = results
             .into_iter()
-            .filter(|r| r.score >= min_score)
+            .filter(|r| r.score >= resolved_min_score)
             .take(top_k)
             .collect();
 
         if filtered.is_empty() {
-            println!("No confident results for {:?} (min_score={})", query, min_score);
+            println!("No confident results for {:?} (min_score={})", query, resolved_min_score);
             return;
         }
 
-        println!("Top {} results for {:?} (mode = {:?}, min_score = {}):\n", filtered.len(), query, mode, min_score);
+        println!("Top {} results for {:?} (mode = {:?}, min_score = {}):\n", filtered.len(), query, mode, resolved_min_score);
         for (i, r) in filtered.iter().enumerate() {
             let preview = r.text.as_deref().unwrap_or("").trim().replace('\n', " ");
             let preview: String = preview.chars().take(180).collect();
