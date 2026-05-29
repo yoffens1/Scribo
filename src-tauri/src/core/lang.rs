@@ -54,7 +54,7 @@ pub fn pick_dominant_language(texts: &[String]) -> String {
 
     let mut counts = HashMap::new();
     for text in texts {
-        if text.trim().len() < crate::constants::MIN_TEXT_LEN_FOR_LANG {
+        if text.trim().len() < crate::core::constants::MIN_TEXT_LEN_FOR_LANG {
             continue;
         }
         if let Some(lang) = detect_language(text) {

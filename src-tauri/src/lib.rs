@@ -5,8 +5,8 @@
 //! retrieval pipelines, Spaced Repetition System (SRS) review, and logging.
 //! It also houses the main entry point to register commands and run the Tauri application.
 
-mod commands;
-mod error;
+pub mod core;
+pub mod commands;
 pub mod cli;
 pub mod domain;
 pub mod services;
@@ -15,10 +15,9 @@ pub mod db;
 pub mod ai;
 pub mod retrieval;
 pub mod logging;
-pub mod constants;
-pub mod lang;
 
-pub use error::AppError;
+pub use crate::core::{constants, lang, error};
+pub use crate::core::error::AppError;
 pub use db::DbState;
 
 /// Initializes and launches the Tauri application.
