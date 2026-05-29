@@ -155,7 +155,7 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              clean_text,
              content='chunks',
              content_rowid='chunk_id',
-             tokenize = 'unicode61 remove_diacritics 2'
+             tokenize = 'trigram'
           );
 
           -- Triggers

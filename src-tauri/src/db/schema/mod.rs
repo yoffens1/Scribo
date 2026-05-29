@@ -48,10 +48,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v18");
+        println!("Init: fresh database, creating all tables directly at v19");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '18')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '19')",
             [],
         )?;
         conn.execute(
@@ -563,9 +563,41 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             version = "18".to_string();
         }
 
-        if version != "18" {
+        if version == "18" {
+            println!("Init: upgrading database from v18 to v19 (trigram FTS)");
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS chunks_fts;
+                 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                     clean_text,
+                     content='chunks',
+                     content_rowid='chunk_id',
+                     tokenize = 'trigram'
+                 );
+
+                 CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks WHEN NEW.level = 1 BEGIN
+                     INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks WHEN OLD.level = 1 BEGIN
+                     INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE OF clean_text ON chunks WHEN NEW.level = 1 BEGIN
+                     INSERT INTO chunks_fts(chunks_fts, rowid, clean_text) VALUES('delete', OLD.chunk_id, OLD.clean_text);
+                     INSERT INTO chunks_fts(rowid, clean_text) VALUES (NEW.chunk_id, NEW.clean_text);
+                 END;
+
+                 INSERT INTO chunks_fts(rowid, clean_text)
+                 SELECT chunk_id, clean_text FROM chunks WHERE level = 1;
+
+                 UPDATE meta SET value = '19' WHERE key = 'schema_version';"
+            )?;
+            version = "19".to_string();
+        }
+
+        if version != "19" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 18", version
+                "Unsupported database version: got {}, expected 19", version
             )));
         }
     }
