@@ -7,10 +7,18 @@ use crate::DbState;
 use crate::db::repos::fragments;
 use crate::retrieval::types::{
     RetrievalConfig, RetrieveOptions, RetrieveFilters, SearchResult, FetchQuery, FetchResult,
+    QueryVariant, VariantSource, RetrievalMode,
 };
 use crate::retrieval::search::{rrf, apply_term_boost};
 use crate::retrieval::config_resolver::resolve_config;
 use crate::retrieval::context::RetrievalContext;
+use crate::retrieval::cache::cached_or_run;
+use crate::retrieval::preprocess::maybe_translate_query;
+
+/// Minimum BM25 hit count (for original query) below which we trigger translate-fallback.
+/// If the first-pass FTS5 search returns fewer than this many results, we assume the
+/// keyword stage has poor recall and attempt a translated query as a supplement.
+const LOW_KEYWORD_RECALL_THRESHOLD: usize = 3;
 
 /// Filters search results using the provided `RetrieveFilters` criteria (e.g., target note_id).
 fn apply_filters(results: Vec<SearchResult>, filters: &Option<RetrieveFilters>) -> Vec<SearchResult> {
@@ -62,9 +70,67 @@ pub async fn retrieve(
     let over_fetch = (top_k * tuning.over_fetch_multiplier).min(tuning.over_fetch_cap);
 
     // 2. Retrieval Stage (Concurrent search loops + Batch Embedding calculations)
-    let variant_lists = ctx
+    let mut variant_lists = ctx
         .retrieve_per_variant(variants, query_embedding, over_fetch)
         .await?;
+
+    // 2.5. Translate-Fallback: if keyword recall is poor for the original query,
+    //      try a translated variant and merge its results into the fusion pool.
+    //      Only triggers in Hybrid mode with an available LLM.
+    if resolved_config.mode == RetrievalMode::Hybrid {
+        let original_kw_hits: usize = variant_lists
+            .first()
+            .map(|(_, _, hits)| *hits)
+            .unwrap_or(0);
+
+        if original_kw_hits < LOW_KEYWORD_RECALL_THRESHOLD {
+            if let Some(ref llm) = ctx.llm {
+                let vault_lang = &ctx.vault_lang;
+                let detected_lang = &ctx.detected_lang;
+
+                // Only translate if the target language is different from the query language,
+                // OR if detected lang is unknown (short query — whatlang unsure)
+                let should_translate = detected_lang != vault_lang || detected_lang == "en" && variant_lists.iter().all(|(_, _, h)| *h < LOW_KEYWORD_RECALL_THRESHOLD);
+
+                if should_translate {
+                    let model_id = llm.config().model.clone();
+                    let translated = cached_or_run(
+                        state,
+                        query,
+                        &model_id,
+                        "translation",
+                        vault_lang,
+                        maybe_translate_query(llm, query, vault_lang)
+                    ).await;
+
+                    if let Some(translated_text) = translated {
+                        if !translated_text.trim().is_empty() && translated_text.trim().to_lowercase() != query.trim().to_lowercase() {
+                            tracing::debug!(
+                                original_kw_hits,
+                                translated_query = %translated_text,
+                                "Low keyword recall — adding translate-fallback variant"
+                            );
+
+                            let fallback_variant = vec![QueryVariant {
+                                text: translated_text,
+                                lang: vault_lang.clone(),
+                                source: VariantSource::Translated,
+                                weight: 0.8,
+                                vector_only: false,
+                            }];
+
+                            if let Ok(mut fallback_lists) = ctx
+                                .retrieve_per_variant(fallback_variant, query_embedding, over_fetch)
+                                .await
+                            {
+                                variant_lists.append(&mut fallback_lists);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // 3. Fusion Stage (Merge matching document ranks using Reciprocal Rank Fusion)
     let candidates_limit = if resolved_config.ai_rerank.as_ref().map(|r| r.enabled).unwrap_or(false) {
@@ -72,7 +138,12 @@ pub async fn retrieve(
     } else {
         top_k
     };
-    let mut fused = rrf(variant_lists, tuning.rrf_k.unwrap_or(60.0), candidates_limit);
+    // Strip the kw_hits field — rrf only needs (results, weight)
+    let lists_for_rrf: Vec<(Vec<SearchResult>, f32)> = variant_lists
+        .into_iter()
+        .map(|(res, w, _)| (res, w))
+        .collect();
+    let mut fused = rrf(lists_for_rrf, tuning.rrf_k.unwrap_or(60.0), candidates_limit);
 
     // 3.5. Term Boost for Exact Matches
     let term_boost_weight = tuning.term_boost_weight.unwrap_or(crate::constants::DEFAULT_TERM_BOOST_WEIGHT);

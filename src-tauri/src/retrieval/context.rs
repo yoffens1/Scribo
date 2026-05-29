@@ -82,7 +82,7 @@ impl<'a> RetrievalContext<'a> {
         variants: Vec<QueryVariant>,
         query_embedding: Option<&[f32]>,
         over_fetch: usize,
-    ) -> Result<Vec<(Vec<SearchResult>, f32)>, AppError> {
+    ) -> Result<Vec<(Vec<SearchResult>, f32, usize)>, AppError> {
         search::retrieve_per_variant(
             self.state,
             self.llm.as_ref(),

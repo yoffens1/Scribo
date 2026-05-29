@@ -60,7 +60,7 @@ pub async fn retrieve_per_variant(
     tuning: RetrievalTuning,
     target_level: Option<i64>,
     over_fetch: usize,
-) -> Result<Vec<(Vec<SearchResult>, f32)>, AppError> {
+) -> Result<Vec<(Vec<SearchResult>, f32, usize)>, AppError> {
     let embeddings = build_variant_embeddings(llm, &variants).await?;
     let pool = state.pool.clone();
 
@@ -75,7 +75,7 @@ pub async fn retrieve_per_variant(
         let pool = pool.clone();
         let tuning = tuning.clone();
         futures.push(async move {
-            let results = retrieve_for_variant(
+            let (results, kw_hits) = retrieve_for_variant(
                 pool,
                 v.clone(),
                 emb,
@@ -85,7 +85,7 @@ pub async fn retrieve_per_variant(
                 target_level,
                 over_fetch,
             ).await?;
-            Ok::<(Vec<SearchResult>, f32), AppError>((results, v.weight))
+            Ok::<(Vec<SearchResult>, f32, usize), AppError>((results, v.weight, kw_hits))
         });
     }
 
@@ -104,7 +104,7 @@ async fn retrieve_for_variant(
     tuning: RetrievalTuning,
     target_level: Option<i64>,
     over_fetch: usize,
-) -> Result<Vec<SearchResult>, AppError> {
+) -> Result<(Vec<SearchResult>, usize), AppError> {
     // 1. Keyword search branch (FTS5 BM25)
     let keyword_future = {
         let text = v.text.clone();
@@ -127,7 +127,8 @@ async fn retrieve_for_variant(
                             note_title: h.hit.note_title.clone(),
                             debug: None,
                         }).collect::<Vec<_>>();
-                        Ok(results)
+                        let count = results.len();
+                        Ok((results, count))
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, query = %text, "Keyword search failed");
@@ -135,7 +136,7 @@ async fn retrieve_for_variant(
                     }
                 }
             } else {
-                Ok(Vec::new())
+                Ok((Vec::new(), 0usize))
             }
         })
     };
@@ -190,7 +191,7 @@ async fn retrieve_for_variant(
     // Join both branches concurrently
     let (kw_res, vec_res) = futures::future::join(keyword_future, vector_future).await;
 
-    let keyword_results = kw_res.map_err(|e| AppError::Other(e.to_string()))??;
+    let (keyword_results, kw_hits) = kw_res.map_err(|e| AppError::Other(e.to_string()))??;
     let vector_results = vec_res.map_err(|e| AppError::Other(e.to_string()))??;
 
     // Perform Reciprocal Rank Fusion (RRF) on hybrid variants
@@ -209,5 +210,5 @@ async fn retrieve_for_variant(
         vector_results
     };
 
-    Ok(results)
+    Ok((results, kw_hits))
 }
