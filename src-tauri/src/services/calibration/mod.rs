@@ -24,9 +24,11 @@ pub struct CalibrationReport {
     pub total_pairs: usize,
     pub initial_embedding_weight: f32,
     pub initial_rrf_k: f32,
+    pub initial_term_boost_weight: f32,
     pub initial_mrr: f32,
     pub optimal_embedding_weight: f32,
     pub optimal_rrf_k: f32,
+    pub optimal_term_boost_weight: f32,
     pub optimal_min_score: f32,
     pub optimal_mrr: f32,
 }
@@ -190,6 +192,7 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
         for p in &pairs {
             let (keyword_hits, vector_hits) = prefetch_hits(&mem_conn, &p.query, query_embeddings.get(&p.query).map(|v| v.as_slice()));
             prefetched.push(EvalSample {
+                query: p.query.clone(),
                 expected_title: p.expected_note_title.clone(),
                 weight: p.relevance_weight,
                 keyword_hits,
@@ -204,6 +207,7 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
             }).unwrap_or((Vec::new(), Vec::new()));
 
             prefetched.push(EvalSample {
+                query: p.query.clone(),
                 expected_title: p.expected_note_title.clone(),
                 weight: p.relevance_weight,
                 keyword_hits,
@@ -212,15 +216,15 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
         }
     }
 
-    // Evaluate initial baseline (default weight=1.5, k=60.0)
-    let initial_mrr = crate::retrieval::calibration::mean_reciprocal_rank(&prefetched, 1.5, 60.0);
+    // Evaluate initial baseline (default weight=1.5, k=60.0, tb=0.05)
+    let initial_mrr = crate::retrieval::calibration::mean_reciprocal_rank(&prefetched, 1.5, 60.0, 0.05);
 
     // Grid search
     let grid_params = crate::retrieval::calibration::GridSearchParameters::default();
-    let (best_w, best_k, best_mrr) = crate::retrieval::calibration::grid_search(&prefetched, &grid_params);
+    let (best_w, best_k, best_tb, best_mrr) = crate::retrieval::calibration::grid_search(&prefetched, &grid_params);
 
     // Calibrate min_score
-    let calibrated_min_score = crate::retrieval::calibration::calibrate_min_score(&prefetched, best_w, best_k);
+    let calibrated_min_score = crate::retrieval::calibration::calibrate_min_score(&prefetched, best_w, best_k, best_tb);
 
     // 5. Save optimal values to database meta table
     state.with_conn(|conn| {
@@ -233,6 +237,11 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
             "INSERT INTO meta (key, value) VALUES ('retrieval_rrf_k', ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![best_k.to_string()],
+        )?;
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('retrieval_term_boost_weight', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![best_tb.to_string()],
         )?;
         conn.execute(
             "INSERT INTO meta (key, value) VALUES ('retrieval_min_score', ?)
@@ -249,9 +258,11 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
         total_pairs: pairs.len(),
         initial_embedding_weight: 1.5,
         initial_rrf_k: 60.0,
+        initial_term_boost_weight: 0.05,
         initial_mrr,
         optimal_embedding_weight: best_w,
         optimal_rrf_k: best_k,
+        optimal_term_boost_weight: best_tb,
         optimal_min_score: calibrated_min_score,
         optimal_mrr: best_mrr,
     })

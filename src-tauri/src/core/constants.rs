@@ -12,6 +12,7 @@ pub const INDEXING_VERSION: &str = "1";
 // ── RRF / fusion parameters ──
 pub const DEFAULT_RRF_K: f32 = 60.0;
 pub const DEFAULT_EMBEDDING_WEIGHT: f32 = 1.5;
+pub const DEFAULT_TERM_BOOST_WEIGHT: f32 = 0.05;
 pub const FUSION_CANDIDATES: usize = 50;       // Must align with search/calibration limit
 
 // ── Pipeline heuristics ──
@@ -33,3 +34,4 @@ pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 // ── Grid search space ──
 pub const GRID_EMBEDDING_WEIGHTS: &[f32] = &[0.0, 0.2, 0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0, 2.5, 3.0];
 pub const GRID_RRF_KS: &[f32] = &[10.0, 20.0, 40.0, 60.0, 80.0, 100.0];
+pub const GRID_TERM_BOOST_WEIGHTS: &[f32] = &[0.0, 0.01, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2, 0.3];

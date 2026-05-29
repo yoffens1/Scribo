@@ -34,11 +34,13 @@ pub fn handle_calibrate(db_path: &Path) {
             println!("Baseline Parameters (Default):");
             println!("  Embedding weight:  {:.2}", report.initial_embedding_weight);
             println!("  RRF constant k:    {:.2}", report.initial_rrf_k);
+            println!("  Term boost weight: {:.2}", report.initial_term_boost_weight);
             println!("  Mean Reciprocal Rank (MRR): {:.2}%", report.initial_mrr * 100.0);
             println!();
             println!("Calibrated Parameters (Optimal):");
             println!("  Embedding weight:  {:.2}  (vector vs keyword importance)", report.optimal_embedding_weight);
             println!("  RRF constant k:    {:.2}  (position dampening factor)", report.optimal_rrf_k);
+            println!("  Term boost weight: {:.2}  (exact keyword match boost factor)", report.optimal_term_boost_weight);
             println!("  Hard min_score:    {:.2}%  (dynamic garbage threshold)", report.optimal_min_score * 100.0);
             println!("  Mean Reciprocal Rank (MRR): {:.2}%  ({:+.1}% improvement)", 
                 report.optimal_mrr * 100.0, 

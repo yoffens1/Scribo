@@ -125,6 +125,8 @@ pub struct RetrievalTuning {
     /// RRF smoothing constant `k`. Higher values reduce the impact of top ranks.
     /// Empirically 60 works well for most corpora. Default: None (which falls back to 60.0 or DB).
     pub rrf_k: Option<f32>,
+    /// Exact query term matches boost factor. Default: None (which falls back to 0.05 or DB).
+    pub term_boost_weight: Option<f32>,
     /// Pool size multiplier for reranking (`candidates = top_k * multiplier`). Default: 4.
     pub rerank_pool_multiplier: usize,
     /// Relevance weight for HyDE variants in the final RRF fusion. Default: 0.8.
@@ -142,6 +144,7 @@ impl Default for RetrievalTuning {
             over_fetch_multiplier: 3,
             over_fetch_cap: 50,
             rrf_k: None,
+            term_boost_weight: None,
             rerank_pool_multiplier: 4,
             hyde_weight: 0.8,
             synonym_weight: 0.6,

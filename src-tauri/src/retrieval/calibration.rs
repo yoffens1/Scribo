@@ -9,6 +9,7 @@ use crate::retrieval::search::rrf;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvalSample {
+    pub query: String,
     pub expected_title: String,
     pub weight: f32,
     pub keyword_hits: Vec<SearchResult>,
@@ -16,13 +17,13 @@ pub struct EvalSample {
 }
 
 /// Evaluates Mean Reciprocal Rank (MRR) for given samples and parameters.
-pub fn mean_reciprocal_rank(samples: &[EvalSample], emb_w: f32, rrf_k: f32) -> f32 {
+pub fn mean_reciprocal_rank(samples: &[EvalSample], emb_w: f32, rrf_k: f32, term_boost_weight: f32) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
     let mut total_rr = 0.0;
     for item in samples {
-        let fused = rrf(
+        let mut fused = rrf(
             vec![
                 (item.keyword_hits.clone(), 1.0),
                 (item.vector_hits.clone(), emb_w),
@@ -30,6 +31,9 @@ pub fn mean_reciprocal_rank(samples: &[EvalSample], emb_w: f32, rrf_k: f32) -> f
             rrf_k,
             crate::constants::FUSION_CANDIDATES,
         );
+
+        // Apply term boost
+        super::search::fusion::apply_term_boost(&mut fused, &item.query, term_boost_weight);
 
         // Find rank of expected note title (case-insensitive)
         let mut found_rank = None;
@@ -53,6 +57,7 @@ pub fn mean_reciprocal_rank(samples: &[EvalSample], emb_w: f32, rrf_k: f32) -> f
 pub struct GridSearchParameters {
     pub embedding_weights: Vec<f32>,
     pub rrf_ks: Vec<f32>,
+    pub term_boost_weights: Vec<f32>,
 }
 
 impl Default for GridSearchParameters {
@@ -60,39 +65,44 @@ impl Default for GridSearchParameters {
         Self {
             embedding_weights: crate::constants::GRID_EMBEDDING_WEIGHTS.to_vec(),
             rrf_ks: crate::constants::GRID_RRF_KS.to_vec(),
+            term_boost_weights: crate::constants::GRID_TERM_BOOST_WEIGHTS.to_vec(),
         }
     }
 }
 
-/// Runs a grid search to optimize RRF parameters.
-/// Returns: `(best_embedding_weight, best_rrf_k, best_mrr)`
+/// Runs a grid search to optimize RRF and Term Boost parameters.
+/// Returns: `(best_embedding_weight, best_rrf_k, best_term_boost_weight, best_mrr)`
 pub fn grid_search(
     samples: &[EvalSample],
     params: &GridSearchParameters,
-) -> (f32, f32, f32) {
+) -> (f32, f32, f32, f32) {
     let mut best_mrr = -1.0;
     let mut best_w = crate::constants::DEFAULT_EMBEDDING_WEIGHT;
     let mut best_k = crate::constants::DEFAULT_RRF_K;
+    let mut best_tb = crate::constants::DEFAULT_TERM_BOOST_WEIGHT;
 
     for &w in &params.embedding_weights {
         for &k in &params.rrf_ks {
-            let mrr = mean_reciprocal_rank(samples, w, k);
-            if mrr > best_mrr {
-                best_mrr = mrr;
-                best_w = w;
-                best_k = k;
+            for &tb in &params.term_boost_weights {
+                let mrr = mean_reciprocal_rank(samples, w, k, tb);
+                if mrr > best_mrr {
+                    best_mrr = mrr;
+                    best_w = w;
+                    best_k = k;
+                    best_tb = tb;
+                }
             }
         }
     }
 
-    (best_w, best_k, best_mrr)
+    (best_w, best_k, best_tb, best_mrr)
 }
 
 /// Calibrates the min_score threshold using a safety margin based on target scores.
-pub fn calibrate_min_score(samples: &[EvalSample], best_w: f32, best_k: f32) -> f32 {
+pub fn calibrate_min_score(samples: &[EvalSample], best_w: f32, best_k: f32, best_tb: f32) -> f32 {
     let mut target_scores = Vec::new();
     for item in samples {
-        let fused = rrf(
+        let mut fused = rrf(
             vec![
                 (item.keyword_hits.clone(), 1.0),
                 (item.vector_hits.clone(), best_w),
@@ -100,6 +110,10 @@ pub fn calibrate_min_score(samples: &[EvalSample], best_w: f32, best_k: f32) -> 
             best_k,
             crate::constants::FUSION_CANDIDATES,
         );
+
+        // Apply term boost
+        super::search::fusion::apply_term_boost(&mut fused, &item.query, best_tb);
+
         for (rank, r) in fused.iter().enumerate() {
             if let Some(ref title) = r.note_title {
                 if title.to_lowercase() == item.expected_title.to_lowercase() && rank <= 5 {
@@ -142,6 +156,7 @@ mod tests {
     #[test]
     fn test_retrieval_calibration() {
         let sample1 = EvalSample {
+            query: "Doc A".to_string(),
             expected_title: "Doc A".to_string(),
             weight: 1.0,
             keyword_hits: vec![
@@ -157,20 +172,21 @@ mod tests {
         let samples = vec![sample1];
 
         // Evaluate MRR with a set of parameters
-        let mrr_equal = mean_reciprocal_rank(&samples, 1.0, 60.0);
+        let mrr_equal = mean_reciprocal_rank(&samples, 1.0, 60.0, 0.05);
         assert!(mrr_equal > 0.0);
 
         // Run grid search
         let params = GridSearchParameters {
             embedding_weights: vec![0.0, 1.0, 2.0],
             rrf_ks: vec![60.0],
+            term_boost_weights: vec![0.0, 0.05],
         };
-        let (best_w, best_k, best_mrr) = grid_search(&samples, &params);
+        let (best_w, best_k, best_tb, best_mrr) = grid_search(&samples, &params);
         assert_eq!(best_k, 60.0);
         assert!(best_mrr >= mrr_equal);
 
         // Calibrate min score
-        let min_score = calibrate_min_score(&samples, best_w, best_k);
+        let min_score = calibrate_min_score(&samples, best_w, best_k, best_tb);
         assert!(min_score > 0.0);
     }
 }

@@ -8,11 +8,12 @@ pub fn resolve_config(state: &DbState, query: &str, config: &RetrievalConfig) ->
     let mut resolved_config = config.clone();
 
     // 0. Load calibrated settings from DB meta table if not explicitly provided in config
-    let (db_emb_weight, db_rrf_k) = state.with_conn(|conn| {
+    let (db_emb_weight, db_rrf_k, db_term_boost) = state.with_conn(|conn| {
         let emb_w = meta::get_f32(conn, "retrieval_embedding_weight")?;
         let rrf_k = meta::get_f32(conn, "retrieval_rrf_k")?;
-        Ok((emb_w, rrf_k))
-    }).unwrap_or((None, None));
+        let term_boost = meta::get_f32(conn, "retrieval_term_boost_weight")?;
+        Ok((emb_w, rrf_k, term_boost))
+    }).unwrap_or((None, None, None));
 
     if resolved_config.embedding_weight.is_none() {
         resolved_config.embedding_weight = db_emb_weight;
@@ -20,10 +21,14 @@ pub fn resolve_config(state: &DbState, query: &str, config: &RetrievalConfig) ->
     if resolved_config.tuning.is_none() {
         let mut tuning = RetrievalTuning::default();
         tuning.rrf_k = Some(db_rrf_k.unwrap_or(DEFAULT_RRF_K));
+        tuning.term_boost_weight = Some(db_term_boost.unwrap_or(DEFAULT_TERM_BOOST_WEIGHT));
         resolved_config.tuning = Some(tuning);
     } else if let Some(ref mut tuning) = resolved_config.tuning {
         if tuning.rrf_k.is_none() {
             tuning.rrf_k = Some(db_rrf_k.unwrap_or(DEFAULT_RRF_K));
+        }
+        if tuning.term_boost_weight.is_none() {
+            tuning.term_boost_weight = Some(db_term_boost.unwrap_or(DEFAULT_TERM_BOOST_WEIGHT));
         }
     }
 

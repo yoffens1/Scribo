@@ -75,7 +75,8 @@ pub async fn retrieve(
     let mut fused = rrf(variant_lists, tuning.rrf_k.unwrap_or(60.0), candidates_limit);
 
     // 3.5. Term Boost for Exact Matches
-    apply_term_boost(&mut fused, query);
+    let term_boost_weight = tuning.term_boost_weight.unwrap_or(crate::constants::DEFAULT_TERM_BOOST_WEIGHT);
+    apply_term_boost(&mut fused, query, term_boost_weight);
 
     // 4. Filtering Stage
     fused = apply_filters(fused, &options.filters);

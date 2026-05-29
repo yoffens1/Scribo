@@ -77,7 +77,7 @@ pub fn rrf(
 }
 
 /// Applies a score boost to search results for exact keyword query term matches.
-pub fn apply_term_boost(results: &mut Vec<SearchResult>, query: &str) {
+pub fn apply_term_boost(results: &mut Vec<SearchResult>, query: &str, term_boost_weight: f32) {
     let query_lower = query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
     if !query_terms.is_empty() {
@@ -105,7 +105,7 @@ pub fn apply_term_boost(results: &mut Vec<SearchResult>, query: &str) {
                     }
                 }
                 if matches_count > 0 {
-                    let boost = (matches_count as f32 * 0.05).min(0.5);
+                    let boost = (matches_count as f32 * term_boost_weight).min(0.5);
                     r.score += boost;
                     if let Some(ref mut dbg) = r.debug {
                         dbg.term_boost = boost;
@@ -197,7 +197,7 @@ mod tests {
             make_result(2, 0, "No match here"),
         ];
 
-        apply_term_boost(&mut results, "atom molecule");
+        apply_term_boost(&mut results, "atom molecule", 0.05);
 
         // "atom" is present in result 1, so it should get a boost of 0.05
         assert!(results[0].score > 0.0);
