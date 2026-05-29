@@ -70,7 +70,7 @@ pub fn handle_reindex(db_path: &Path, force: bool) {
                 let conn = pool_guard.as_ref().unwrap().get().unwrap();
                 let mut stmt = conn.prepare(
                     "SELECT fragment_id, clean_text FROM fragments
-                     WHERE note_id = ?1 AND level = 1"
+                     WHERE note_id = ?1"
                 ).unwrap();
                 let rows = stmt.query_map([note_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
                 rows.filter_map(Result::ok).collect()

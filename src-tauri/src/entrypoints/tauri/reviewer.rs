@@ -57,8 +57,7 @@ pub async fn reviewer_get_card(
             .ok_or_else(|| "Card not found".to_string())?;
 
         let section = match card.section_id {
-            Some(sid) => crate::db::repos::sections::find_by_id(conn, sid)
-                .map_err(|e| e.to_string())?,
+            Some(sid) => crate::db::repos::fragments::find_as_section(conn, sid)?,
             None => None,
         };
 
@@ -83,15 +82,13 @@ pub async fn reviewer_upgrade_card_front_with_ai(
     let service = crate::ai::LlmService::new(config, Some(app));
     
     let (card, section_text) = state.with_conn(|conn| {
-        let card = crate::db::repos::cards::find_by_id(conn, crate::domain::CardId(card_id))
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Card not found".to_string())?;
+        let card = crate::db::repos::cards::find_by_id(conn, crate::domain::CardId(card_id))?
+            .ok_or_else(|| crate::error::AppError::Other("Card not found".to_string()))?;
 
         let section_text = match card.section_id {
             Some(sid) => {
-                let section = crate::db::repos::sections::find_by_id(conn, sid)
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "Section not found".to_string())?;
+                let section = crate::db::repos::fragments::find_as_section(conn, sid)?
+                    .ok_or_else(|| crate::error::AppError::Other("Section not found".to_string()))?;
                 section.text_raw
             }
             None => {

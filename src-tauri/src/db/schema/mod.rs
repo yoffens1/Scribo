@@ -48,10 +48,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v22");
+        println!("Init: fresh database, creating all tables directly at v23");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '22')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '23')",
             [],
         )?;
         conn.execute(
@@ -692,9 +692,82 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             version = "22".to_string();
         }
 
-        if version != "22" {
+        // ── v22 → v23: simplify fragments schema by removing unused columns ──
+        if version == "22" {
+            println!("Init: upgrading database from v22 to v23 (simplify fragments table)");
+            conn.execute_batch(
+                "-- 1. Create the new, simplified fragments table
+                 CREATE TABLE fragments_new (
+                     fragment_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                     note_id                 INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+                     order_index             INTEGER NOT NULL,
+                     raw_text                TEXT NOT NULL,
+                     raw_text_hash           TEXT NOT NULL,
+                     clean_text              TEXT NOT NULL,
+                     clean_text_hash         TEXT NOT NULL,
+                     created_at              INTEGER NOT NULL,
+                     updated_at              INTEGER NOT NULL
+                 );
+
+                 -- 2. Copy the existing level=1 fragments into it
+                 INSERT INTO fragments_new (fragment_id, note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, created_at, updated_at)
+                 SELECT fragment_id, note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, created_at, updated_at
+                 FROM fragments;
+
+                 -- 3. Drop the old table, triggers, and indices
+                 DROP TABLE fragments;
+                 DROP TRIGGER IF EXISTS fragments_fts_insert;
+                 DROP TRIGGER IF EXISTS fragments_fts_delete;
+                 DROP TRIGGER IF EXISTS fragments_fts_update;
+                 DROP TRIGGER IF EXISTS cards_status_orphaned_on_fragment_delete;
+                 DROP TABLE IF EXISTS fragments_fts;
+
+                 -- 4. Rename new table to fragments
+                 ALTER TABLE fragments_new RENAME TO fragments;
+
+                 -- 5. Recreate virtual table and triggers
+                 CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
+                     clean_text,
+                     content='fragments',
+                     content_rowid='fragment_id',
+                     tokenize='trigram'
+                 );
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments BEGIN
+                    INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments BEGIN
+                    INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
+                 END;
+
+                 CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF clean_text ON fragments BEGIN
+                    INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
+                    INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
+                 END;
+
+                 -- 6. Recreate indexes
+                 DROP INDEX IF EXISTS idx_fragments_note_level;
+                 DROP INDEX IF EXISTS idx_fragments_parent;
+                 DROP INDEX IF EXISTS idx_fragments_clean_hash;
+                 DROP INDEX IF EXISTS idx_fragments_note_leaf_hash;
+
+                 CREATE INDEX IF NOT EXISTS idx_fragments_clean_hash ON fragments(clean_text_hash);
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_fragments_note_leaf_hash
+                     ON fragments(note_id, clean_text_hash);
+
+                 -- 7. Populate virtual table FTS
+                 INSERT INTO fragments_fts(rowid, clean_text)
+                 SELECT fragment_id, clean_text FROM fragments;
+
+                 UPDATE meta SET value = '23' WHERE key = 'schema_version';"
+            )?;
+            version = "23".to_string();
+        }
+
+        if version != "23" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 22", version
+                "Unsupported database version: got {}, expected 23", version
             )));
         }
     }

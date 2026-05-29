@@ -15,7 +15,7 @@ pub async fn refresh_stale_cards_for_notes(
             for card in cards {
                 if card.status == crate::domain::card::CardLifecycle::Stale {
                     if let Some(sid) = card.section_id {
-                        if let Some(section) = crate::db::repos::sections::find_by_id(conn, sid)? {
+                        if let Some(section) = crate::db::repos::fragments::find_as_section(conn, sid)? {
                             stale.push((card, section));
                         }
                     }

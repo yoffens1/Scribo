@@ -83,7 +83,6 @@ fn execute_fts_query(
           JOIN fragments frag ON frag.fragment_id = fragments_fts.rowid
           JOIN notes n ON n.note_id = frag.note_id
           WHERE fragments_fts MATCH ?
-            AND frag.level = 1
             AND n.lifecycle = 'active'
           ORDER BY bm25(fragments_fts)
           LIMIT ?",

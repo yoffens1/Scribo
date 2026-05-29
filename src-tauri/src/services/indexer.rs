@@ -22,67 +22,6 @@ use crate::AppError;
 use crate::fragmenter::{fragment_paired, FragmentOptions};
 use crate::db::hash::content_hash;
 
-// ─── Byte-range alignment helpers ────────────────────────────────────────────
-
-/// Rounds `idx` down to the nearest valid UTF-8 char boundary in `s`.
-fn align_to_char_boundary_floor(s: &str, mut idx: usize) -> usize {
-    if idx > s.len() {
-        idx = s.len();
-    }
-    while idx > 0 && !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
-/// Rounds `idx` up to the nearest valid UTF-8 char boundary in `s`.
-fn align_to_char_boundary_ceil(s: &str, mut idx: usize) -> usize {
-    if idx > s.len() {
-        return s.len();
-    }
-    while idx < s.len() && !s.is_char_boundary(idx) {
-        idx += 1;
-    }
-    idx
-}
-
-/// Locates the byte range of `text_raw` inside `content`, starting the search from `last_index`.
-///
-/// Falls back gracefully if an exact match is not found:
-/// 1. Tries to match the first line of `text_raw` as a prefix anchor.
-/// 2. If that also fails, returns a best-effort range starting at `last_index`.
-///
-/// All returned indices are aligned to UTF-8 char boundaries.
-fn find_safe_offsets(content: &str, text_raw: &str, last_index: usize) -> (usize, usize) {
-    if let Some(idx) = content[last_index..].find(text_raw) {
-        return (last_index + idx, last_index + idx + text_raw.len());
-    }
-
-    // Fallback 1: match first line as anchor
-    let prefix = text_raw.lines().next().unwrap_or("").trim();
-    if !prefix.is_empty() {
-        if let Some(idx) = content[last_index..].find(prefix) {
-            let start = last_index + idx;
-            let mut end = start + text_raw.len();
-            if end > content.len() {
-                end = content.len();
-            }
-            let start_aligned = align_to_char_boundary_floor(content, start);
-            let end_aligned = align_to_char_boundary_ceil(content, end);
-            return (start_aligned, end_aligned);
-        }
-    }
-
-    // Fallback 2: best-effort range from last_index
-    let start = align_to_char_boundary_floor(content, last_index);
-    let mut end = start + text_raw.len();
-    if end > content.len() {
-        end = content.len();
-    }
-    let end_aligned = align_to_char_boundary_ceil(content, end);
-    (start, end_aligned)
-}
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /// Metadata required to index a note.
@@ -167,7 +106,6 @@ pub fn persist_indexed_file(
                         text_clean,
                         &source_hash_clean,
                         true, // clear_embedding = true
-                        None, // parent_fragment_id — no longer used
                     ).map_err(|e| AppError::Other(e.to_string()))?;
                 }
             } else {
@@ -179,9 +117,7 @@ pub fn persist_indexed_file(
                     &source_hash_raw,
                     text_clean,
                     &source_hash_clean,
-                    None, // token_count — filled by embedding pipeline
                     &[], // embedding blob — written later by the embedder
-                    None, // parent_fragment_id — no longer used
                 ).map_err(|e| AppError::Other(e.to_string()))?;
             }
         } else {

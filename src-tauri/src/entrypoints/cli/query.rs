@@ -140,6 +140,7 @@ pub fn handle_query(
                 note_id: None,
             }),
             target_level: Some(1),
+            explain: Some(true),
             ..Default::default()
         };
 
@@ -157,22 +158,55 @@ pub fn handle_query(
             .collect();
 
         if filtered.is_empty() {
-            println!("No confident results for {:?} (min_score={})", query, resolved_min_score);
+            println!("No confident results for {:?} (min_score={:.1}%)", query, resolved_min_score * 100.0);
             return;
         }
 
-        println!("Top {} results for {:?} (mode = {:?}, min_score = {}):\n", filtered.len(), query, mode, resolved_min_score);
+        let max_score = filtered.first().map(|r| r.score).unwrap_or(0.0);
+
+        println!("Top {} results for {:?} (mode = {:?}, min_score = {:.1}%):\n", filtered.len(), query, mode, resolved_min_score * 100.0);
         for (i, r) in filtered.iter().enumerate() {
+            let note_title = r.note_title.as_deref().unwrap_or("Untitled");
             let preview = r.text.as_deref().unwrap_or("").trim().replace('\n', " ");
             let preview: String = preview.chars().take(180).collect();
+
+            let rel_percentage = if max_score > 0.0 {
+                (r.score / max_score) * 100.0
+            } else {
+                0.0
+            };
+
             println!(
-                "{:>2}. [score {:.4}] note={} frag={}\n    {}",
+                "{:>2}. [Relevance: {:.2}%]  Note: \"{}\" (ID: {}, Fragment: {})",
                 i + 1,
-                r.score,
+                rel_percentage,
+                note_title,
                 r.fragment_ref.note_id.0,
                 r.fragment_ref.fragment_index,
-                preview,
             );
+            println!("    \"{}\"", preview);
+
+            if let Some(ref dbg) = r.debug {
+                let bm25_str = dbg.bm25_rank.map(|rk| format!("#{}", rk + 1)).unwrap_or_else(|| "N/A".to_string());
+                let vector_str = dbg.vector_rank.map(|rk| format!("#{}", rk + 1)).unwrap_or_else(|| "N/A".to_string());
+
+                let total_parts = dbg.rrf_score + dbg.term_boost;
+                let rrf_contrib = if total_parts > 0.0 { (dbg.rrf_score / total_parts) * 100.0 } else { 0.0 };
+                let boost_contrib = if total_parts > 0.0 { (dbg.term_boost / total_parts) * 100.0 } else { 0.0 };
+
+                println!(
+                    "    Breakdown: RRF Rank-score Contribution = {:.2}%, Lexical Boost Contribution = {:.2}%",
+                    rrf_contrib,
+                    boost_contrib,
+                );
+                print!("    Diagnostic: BM25 Rank = {}, Vector Rank = {}, Raw Score = {:.2}%", bm25_str, vector_str, r.score * 100.0);
+                if let Some(rerank) = dbg.rerank_score {
+                    print!(", Rerank Score = {:.2}%", rerank * 100.0);
+                }
+                println!("\n");
+            } else {
+                println!();
+            }
         }
     });
 

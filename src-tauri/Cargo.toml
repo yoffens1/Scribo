@@ -89,9 +89,6 @@ gguf = "0.1.2"
 proptest = "1.11.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 
-[[test]]
-name = "chunker_tests"
-path = "tests/chunker/main.rs"
 
 [[bench]]
 name = "chunker_bench"

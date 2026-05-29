@@ -26,60 +26,11 @@ pub async fn distribute_analyze_draft(
 /// Mean-pools fragment embeddings (`level = 1`) into section embeddings (`level = 0`).
 /// Called during Phase 2 after new fragments have been embedded.
 pub fn compute_and_save_section_embeddings(
-    conn: &rusqlite::Connection,
-    note_id: i64,
-    embedding_model: &str,
-    embedding_model_version: &str,
+    _conn: &rusqlite::Connection,
+    _note_id: i64,
+    _embedding_model: &str,
+    _embedding_model_version: &str,
 ) -> Result<(), AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT fragment_id FROM fragments WHERE note_id = ? AND level = 0"
-    )?;
-    let section_ids: Vec<i64> = stmt.query_map([note_id], |r| r.get(0))?
-        .collect::<Result<Vec<i64>, _>>()?;
-
-    for sec_id in section_ids {
-        let mut stmt_frags = conn.prepare(
-            "SELECT ce.embedding 
-             FROM fragment_embeddings ce
-             JOIN fragments frag ON frag.fragment_id = ce.fragment_id
-             WHERE frag.parent_fragment_id = ?1 AND frag.level = 1 
-               AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3"
-        )?;
-        let frags: Vec<Vec<u8>> = stmt_frags.query_map(rusqlite::params![sec_id, embedding_model, embedding_model_version], |r| r.get(0))?
-            .collect::<Result<Vec<Vec<u8>>, _>>()?;
-
-        if frags.is_empty() {
-            continue;
-        }
-
-        let mut sum_vec = Vec::new();
-        let mut count = 0;
-
-        for frag_bytes in frags {
-            let float_slice = bytemuck::cast_slice::<u8, f32>(&frag_bytes);
-            if sum_vec.is_empty() {
-                sum_vec = float_slice.to_vec();
-            } else {
-                for (s, &f) in sum_vec.iter_mut().zip(float_slice.iter()) {
-                    *s += f;
-                }
-            }
-            count += 1;
-        }
-
-        if count > 0 && !sum_vec.is_empty() {
-            for val in sum_vec.iter_mut() {
-                *val /= count as f32;
-            }
-            let mean_bytes = bytemuck::cast_slice::<f32, u8>(&sum_vec);
-            let dim = sum_vec.len();
-            conn.execute(
-                "INSERT OR REPLACE INTO fragment_embeddings (fragment_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
-                 VALUES (?, ?, ?, ?, ?, strftime('%s','now'))",
-                rusqlite::params![sec_id, embedding_model, embedding_model_version, dim, mean_bytes],
-            )?;
-        }
-    }
     Ok(())
 }
 
@@ -171,7 +122,7 @@ pub async fn distribute_apply_plan(
             }
         }
 
-        // Save fragment embeddings and compute mean-pooled section embeddings
+        // Save fragment embeddings
         state.with_write(|conn| {
             for (idx, frag) in fragments.iter().enumerate() {
                 if let Some(ref emb_bytes) = final_embeddings[idx] {
@@ -180,11 +131,6 @@ pub async fn distribute_apply_plan(
                         eprintln!("Failed to set embedding for note {} fragment {}: {}", note_id, frag_idx, e);
                     }
                 }
-            }
-
-            // Compute section embeddings via mean pooling
-            if let Err(e) = compute_and_save_section_embeddings(conn, note_id, model_name, "1") {
-                eprintln!("Failed to compute section embeddings for note {}: {}", note_id, e);
             }
             Ok(())
         })?;

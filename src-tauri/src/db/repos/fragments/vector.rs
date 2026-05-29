@@ -60,7 +60,7 @@ impl Ord for HitRecord {
 pub fn vector_search(
     conn: &Connection,
     query_embedding_bytes: &[u8],
-    level: Option<i64>,
+    _level: Option<i64>,
     limit: usize,
     embedding_model: &str,
     embedding_model_version: &str,
@@ -70,28 +70,15 @@ pub fn vector_search(
     let mut top_hits = std::collections::BinaryHeap::with_capacity(limit + 1);
 
     {
-        let sql = if level.is_some() {
-            "SELECT ce.fragment_id, ce.embedding
-             FROM fragment_embeddings ce
-             JOIN fragments frag ON frag.fragment_id = ce.fragment_id
-             JOIN notes n ON n.note_id = frag.note_id
-             WHERE frag.level = ?1 AND n.lifecycle = 'active'
-               AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3".to_string()
-        } else {
-            "SELECT ce.fragment_id, ce.embedding
+        let sql = "SELECT ce.fragment_id, ce.embedding
              FROM fragment_embeddings ce
              JOIN fragments frag ON frag.fragment_id = ce.fragment_id
              JOIN notes n ON n.note_id = frag.note_id
              WHERE n.lifecycle = 'active'
-               AND ce.embedding_model = ?1 AND ce.embedding_model_version = ?2".to_string()
-        };
+               AND ce.embedding_model = ?1 AND ce.embedding_model_version = ?2".to_string();
         let mut stmt = conn.prepare(&sql)?;
 
-        let mut rows = if let Some(l) = level {
-            stmt.query(rusqlite::params![l, embedding_model, embedding_model_version])?
-        } else {
-            stmt.query(rusqlite::params![embedding_model, embedding_model_version])?
-        };
+        let mut rows = stmt.query(rusqlite::params![embedding_model, embedding_model_version])?;
 
         while let Some(row) = rows.next()? {
             let fragment_id: i64 = row.get(0)?;

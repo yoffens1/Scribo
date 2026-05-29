@@ -46,8 +46,6 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           CREATE TABLE IF NOT EXISTS fragments (
              fragment_id             INTEGER PRIMARY KEY AUTOINCREMENT,
              note_id                 INTEGER NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
-             parent_fragment_id      INTEGER REFERENCES fragments(fragment_id) ON DELETE CASCADE,
-             level                   INTEGER NOT NULL CHECK (level IN (0, 1)),           -- 0 = section, 1 = fragment
              order_index             INTEGER NOT NULL,
              
              raw_text                TEXT NOT NULL,
@@ -55,17 +53,6 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              clean_text              TEXT NOT NULL,
              clean_text_hash         TEXT NOT NULL,
              
-             -- section metadata (level=0)
-             heading                 TEXT,
-             heading_level           INTEGER,
-             content_offset_start    INTEGER NOT NULL DEFAULT 0,
-             content_offset_end      INTEGER NOT NULL DEFAULT 0,
-             
-             -- fragment metadata (level=1)
-             token_count             INTEGER,
-             
-             -- general
-             kind                    TEXT NOT NULL DEFAULT 'fragment' CHECK (kind IN ('heading_block', 'fragment')),
              created_at              INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              updated_at              INTEGER NOT NULL DEFAULT (strftime('%s','now'))
           );
@@ -162,15 +149,15 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           );
 
           -- Triggers
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments WHEN NEW.level = 1 BEGIN
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_insert AFTER INSERT ON fragments BEGIN
              INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments WHEN OLD.level = 1 BEGIN
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_delete AFTER DELETE ON fragments BEGIN
              INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
           END;
 
-          CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF clean_text ON fragments WHEN NEW.level = 1 BEGIN
+          CREATE TRIGGER IF NOT EXISTS fragments_fts_update AFTER UPDATE OF clean_text ON fragments BEGIN
              INSERT INTO fragments_fts(fragments_fts, rowid, clean_text) VALUES('delete', OLD.fragment_id, OLD.clean_text);
              INSERT INTO fragments_fts(rowid, clean_text) VALUES (NEW.fragment_id, NEW.clean_text);
           END;
@@ -219,14 +206,10 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           CREATE INDEX IF NOT EXISTS idx_notes_drafts ON notes(updated_at DESC) WHERE lifecycle = 'draft';
           CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(updated_at DESC) WHERE is_pinned = 1 AND lifecycle != 'deleted';
 
-          CREATE INDEX IF NOT EXISTS idx_fragments_note_level ON fragments(note_id, level);
-          CREATE INDEX IF NOT EXISTS idx_fragments_parent ON fragments(parent_fragment_id);
           CREATE INDEX IF NOT EXISTS idx_fragments_clean_hash ON fragments(clean_text_hash);
-          -- Prevents duplicate leaf fragments (level=1) with identical text within the same note.
-          -- level=0 (sections) are excluded so section+fragment pairs with identical text are still allowed.
+          -- Prevents duplicate fragments with identical text within the same note.
           CREATE UNIQUE INDEX IF NOT EXISTS idx_fragments_note_leaf_hash
-              ON fragments(note_id, clean_text_hash)
-              WHERE level = 1;
+              ON fragments(note_id, clean_text_hash);
           CREATE INDEX IF NOT EXISTS idx_fragment_emb_model ON fragment_embeddings(embedding_model, embedding_model_version);
           
           CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(section_id);

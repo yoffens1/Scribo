@@ -133,7 +133,7 @@ pub fn fetch(
         note_id: ch.fragment.note_id,
         fragment_index: ch.fragment.fragment_index,
         fragment_text: Some(ch.fragment.text_clean),
-        token_count: ch.fragment.token_count,
+        token_count: None,
         embedding: ch.fragment.embedding.unwrap_or_default(),
     }).collect();
 

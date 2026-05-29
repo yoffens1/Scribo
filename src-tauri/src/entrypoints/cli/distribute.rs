@@ -216,13 +216,6 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
                             }
                         }
                     }
-
-                    // Compute section embeddings via mean pooling
-                    if let Err(e) = crate::commands::distribute::compute_and_save_section_embeddings(conn, id, model_name, "1") {
-                        println!("[Embedder] Failed to compute section embeddings for note {}: {}", id, e);
-                    } else {
-                        println!("[Embedder] Section embeddings pooled and updated for note {}.", id);
-                    }
                 }
 
                 // Refresh stale cards

@@ -5,7 +5,7 @@
 //! and an FTS index for hybrid search.
 
 use serde::{Deserialize, Serialize};
-use super::{NoteId, SectionId};
+use super::NoteId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -30,16 +30,12 @@ pub struct Fragment {
     pub id: FragmentId,
     /// Parent note identifier.
     pub note_id: NoteId,
-    /// Reference to the note section this fragment is part of.
-    pub section_id: Option<SectionId>,
     /// Sequential index of this fragment within its note (0-based).
     pub fragment_index: i64,
     /// Cleaned text content of the fragment (without markdown syntax/formatting).
     pub text_clean: String,
     /// BLAKE3 hash of the cleaned text.
     pub clean_hash: String,
-    /// Token count estimated using tiktoken, if calculated.
-    pub token_count: Option<i64>,
     /// Raw byte vector containing the little-endian f32 embedding.
     pub embedding: Option<Vec<u8>>,
 }
@@ -53,8 +49,6 @@ pub struct FragmentInsertRow {
     pub text_clean: String,
     /// BLAKE3 hash of the cleaned text.
     pub clean_hash: String,
-    /// Estimated token count.
-    pub token_count: Option<i64>,
     /// Raw byte representation of the f32 vector embedding.
     pub embedding: Vec<u8>,
 }
@@ -64,16 +58,12 @@ pub struct FragmentInsertRow {
 pub struct NewFragment {
     /// Parent note identifier.
     pub note_id: NoteId,
-    /// Reference to the note section.
-    pub section_id: Option<SectionId>,
     /// Sequential index within the note.
     pub fragment_index: i64,
     /// Cleaned text content.
     pub text_clean: String,
     /// BLAKE3 hash of the cleaned text.
     pub clean_hash: String,
-    /// Estimated token count.
-    pub token_count: Option<i64>,
     /// Optional raw byte vector embedding.
     pub embedding: Option<Vec<u8>>,
 }

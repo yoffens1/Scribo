@@ -39,7 +39,7 @@ mod tests {
             let note_id = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
 
             conn.execute(
-                "INSERT INTO fragments (fragment_id, note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (1, ?, 0, 0, 'Section 1 text', 'hash1', 'Section 1 text', 'hash1', 'heading_block')",
+                "INSERT INTO fragments (fragment_id, note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (1, ?, 0, 'Section 1 text', 'hash1', 'Section 1 text', 'hash1')",
                 [note_id.0],
             ).unwrap();
             conn.execute(
@@ -92,7 +92,7 @@ mod tests {
             };
             let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 1, 0, 'Line one of text', 'hash1', 'Line one of text', 'hash1', 'fragment')",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'Line one of text', 'hash1', 'Line one of text', 'hash1')",
                 [nid.0],
             ).unwrap();
             let fragment_id = conn.last_insert_rowid();
@@ -128,7 +128,7 @@ mod tests {
             };
             let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, kind) VALUES (?, 1, 0, 'This is a note about neural networks and machine learning.', 'hash1', 'This is a note about neural networks and machine learning.', 'hash1', 10, 'fragment')",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'This is a note about neural networks and machine learning.', 'hash1', 'This is a note about neural networks and machine learning.', 'hash1')",
                 [nid.0],
             ).unwrap();
             let fragment_id1 = conn.last_insert_rowid();
@@ -138,7 +138,7 @@ mod tests {
             ).unwrap();
 
             conn.execute(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, kind) VALUES (?, 1, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 'Obsidian is a great tool for personal knowledge management.', 'hash2', 9, 'fragment')",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 'Obsidian is a great tool for personal knowledge management.', 'hash2')",
                 [nid.0],
             ).unwrap();
             let fragment_id2 = conn.last_insert_rowid();
@@ -210,16 +210,9 @@ mod tests {
             let persisted_id = scribo_lib::services::indexer::persist_indexed_file(conn, payload).unwrap();
             assert_eq!(persisted_id, note_id.0);
 
-            // Verify fragments were created (level=1 only, no level=0 sections)
+            // Verify fragments were created
             let frags = scribo_lib::db::repos::fragments::list_by_note(conn, note_id.0, "test-model").unwrap();
-            assert_eq!(frags.len(), 2, "Two heading sections → two level=1 fragments");
-
-            let level0_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM fragments WHERE note_id = ? AND level = 0",
-                [note_id.0],
-                |r| r.get(0),
-            ).unwrap();
-            assert_eq!(level0_count, 0, "No level=0 rows should be written by the indexer");
+            assert_eq!(frags.len(), 2, "Two heading sections → two fragments");
 
             // Re-index with same content: idempotent — fragment count unchanged
             let payload_same = scribo_lib::services::indexer::IndexingPayload {
@@ -356,12 +349,11 @@ mod tests {
             let note_count: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
             assert!(note_count > 0, "Should have successfully imported at least one note");
 
-            // Verify fragments: level=1 only, each with a valid embedding
+            // Verify fragments: each with a valid embedding
             let mut stmt = conn.prepare(
                 "SELECT c.fragment_id, c.note_id, c.clean_text, ce.embedding 
                  FROM fragments c
-                 JOIN fragment_embeddings ce ON ce.fragment_id = c.fragment_id
-                 WHERE c.level = 1"
+                 JOIN fragment_embeddings ce ON ce.fragment_id = c.fragment_id"
             )?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next().unwrap() {
@@ -377,12 +369,6 @@ mod tests {
                 // Check embedding matches expected size (EMBEDDING_DIM * 4 bytes)
                 assert_eq!(embedding.len(), scribo_lib::constants::EMBEDDING_DIM * 4, "Embedding blob should match EMBEDDING_DIM floats");
             }
-
-            // Verify no level=0 (section) rows exist
-            let section_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM fragments WHERE level = 0", [], |r| r.get(0)
-            ).unwrap();
-            assert_eq!(section_count, 0, "No level=0 section rows should exist after import");
 
             Ok(())
         }).unwrap();
@@ -430,7 +416,7 @@ mod tests {
             // Setup sections and cards for the notes
             // Section for Math
             let math_sec = conn.query_row(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 0, 0, 'Math root', 'hash1', 'Math root', 'hash1', 'heading_block') RETURNING fragment_id",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'Math root', 'hash1', 'Math root', 'hash1') RETURNING fragment_id",
                 [math_id.0],
                 |r| r.get::<_, i64>(0)
             ).unwrap();
@@ -442,7 +428,7 @@ mod tests {
 
             // Section for Linear Algebra
             let la_sec = conn.query_row(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 0, 0, 'LA content', 'hash2', 'LA content', 'hash2', 'heading_block') RETURNING fragment_id",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'LA content', 'hash2', 'LA content', 'hash2') RETURNING fragment_id",
                 [la_id.0],
                 |r| r.get::<_, i64>(0)
             ).unwrap();
@@ -454,7 +440,7 @@ mod tests {
 
             // Section for Integration
             let integration_sec = conn.query_row(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 0, 0, 'Integration content', 'hash3', 'Integration content', 'hash3', 'heading_block') RETURNING fragment_id",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'Integration content', 'hash3', 'Integration content', 'hash3') RETURNING fragment_id",
                 [integration_id.0],
                 |r| r.get::<_, i64>(0)
             ).unwrap();
@@ -556,7 +542,7 @@ mod tests {
 
             // Setup section and card for Linear Algebra
             let la_sec = conn.query_row(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 0, 0, 'LA content', 'hash1', 'LA content', 'hash1', 'heading_block') RETURNING fragment_id",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'LA content', 'hash1', 'LA content', 'hash1') RETURNING fragment_id",
                 [la_id.0],
                 |r| r.get::<_, i64>(0)
             ).unwrap();
@@ -568,7 +554,7 @@ mod tests {
 
             // Setup section and cards for Calculus
             let calc_sec = conn.query_row(
-                "INSERT INTO fragments (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 0, 0, 'Calc content', 'hash2', 'Calc content', 'hash2', 'heading_block') RETURNING fragment_id",
+                "INSERT INTO fragments (note_id, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash) VALUES (?, 0, 'Calc content', 'hash2', 'Calc content', 'hash2') RETURNING fragment_id",
                 [calc_id.0],
                 |r| r.get::<_, i64>(0)
             ).unwrap();
