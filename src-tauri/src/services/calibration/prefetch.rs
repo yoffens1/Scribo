@@ -26,7 +26,7 @@ pub fn prefetch_hits(
 
     let vector_hits = if let Some(emb) = embedding {
         let bytes = bytemuck::cast_slice::<f32, u8>(emb).to_vec();
-        match fragments::vector_search(conn, &bytes, Some(1), crate::constants::FUSION_CANDIDATES) {
+        match fragments::vector_search(conn, &bytes, Some(1), crate::constants::FUSION_CANDIDATES, crate::ai::embedding::CURRENT_EMBEDDING_MODEL, "1") {
             Ok(hits) => hits.into_iter().map(|h| SearchResult {
                 fragment_ref: FragmentRef {
                     note_id: h.hit.note_id,

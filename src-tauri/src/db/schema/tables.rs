@@ -55,12 +55,6 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              clean_text              TEXT NOT NULL,
              clean_text_hash         TEXT NOT NULL,
              
-             embedding               BLOB,
-             embedding_source        TEXT,                  -- 'direct' | 'mean_pool' | 'summary' | 'contextual'
-             embedding_model         TEXT,
-             embedding_model_version TEXT,
-             embedded_at             INTEGER,
-             
              -- section metadata (level=0)
              heading                 TEXT,
              heading_level           INTEGER,
@@ -75,6 +69,16 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
              deleted_at              INTEGER,
              created_at              INTEGER NOT NULL DEFAULT (strftime('%s','now')),
              updated_at              INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS chunk_embeddings (
+             chunk_id                INTEGER NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+             embedding_model         TEXT NOT NULL,
+             embedding_model_version TEXT NOT NULL,
+             dim                     INTEGER NOT NULL,
+             embedding               BLOB NOT NULL,
+             embedded_at             INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+             PRIMARY KEY (chunk_id, embedding_model, embedding_model_version)
           );
 
           CREATE TABLE IF NOT EXISTS embedding_cache (
@@ -235,7 +239,7 @@ pub fn create_schema(conn: &Connection) -> Result<(), AppError> {
           CREATE INDEX IF NOT EXISTS idx_chunks_note_level ON chunks(note_id, level);
           CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_chunk_id);
           CREATE INDEX IF NOT EXISTS idx_chunks_clean_hash ON chunks(clean_text_hash);
-          CREATE INDEX IF NOT EXISTS idx_chunks_embedded_alive ON chunks(level) WHERE deleted_at IS NULL AND embedding IS NOT NULL;
+          CREATE INDEX IF NOT EXISTS idx_chunk_emb_model ON chunk_embeddings(embedding_model, embedding_model_version);
           
           CREATE INDEX IF NOT EXISTS idx_cards_section_id ON cards(chunk_id);
           CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules (next_review) WHERE next_review IS NOT NULL;

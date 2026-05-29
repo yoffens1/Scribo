@@ -62,29 +62,37 @@ pub fn vector_search(
     query_embedding_bytes: &[u8],
     level: Option<i64>,
     limit: usize,
+    embedding_model: &str,
+    embedding_model_version: &str,
 ) -> Result<Vec<ScoredHit>, AppError> {
     let query_vector = bytes_to_f32_slice(query_embedding_bytes);
 
     let mut top_hits = std::collections::BinaryHeap::with_capacity(limit + 1);
 
     {
-        let sql = if let Some(l) = level {
-            format!(
-                "SELECT frag.chunk_id, frag.embedding
-                 FROM chunks frag
-                 JOIN notes n ON n.note_id = frag.note_id
-                 WHERE frag.level = {} AND n.lifecycle = 'active'",
-                l
-            )
-        } else {
-            "SELECT frag.chunk_id, frag.embedding
-             FROM chunks frag
+        let sql = if level.is_some() {
+            "SELECT ce.chunk_id, ce.embedding
+             FROM chunk_embeddings ce
+             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
              JOIN notes n ON n.note_id = frag.note_id
-             WHERE n.lifecycle = 'active'".to_string()
+             WHERE frag.level = ?1 AND n.lifecycle = 'active'
+               AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3".to_string()
+        } else {
+            "SELECT ce.chunk_id, ce.embedding
+             FROM chunk_embeddings ce
+             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
+             JOIN notes n ON n.note_id = frag.note_id
+             WHERE n.lifecycle = 'active'
+               AND ce.embedding_model = ?1 AND ce.embedding_model_version = ?2".to_string()
         };
         let mut stmt = conn.prepare(&sql)?;
 
-        let mut rows = stmt.query([])?;
+        let mut rows = if let Some(l) = level {
+            stmt.query(rusqlite::params![l, embedding_model, embedding_model_version])?
+        } else {
+            stmt.query(rusqlite::params![embedding_model, embedding_model_version])?
+        };
+
         while let Some(row) = rows.next()? {
             let fragment_id: i64 = row.get(0)?;
             let blob_ref = row.get_ref(1)?;

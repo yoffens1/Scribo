@@ -46,8 +46,8 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, kind)
-             VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, 'fragment')",
+            "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, kind)
+             VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'fragment')",
         )?;
         for row in &rows {
             stmt.execute(rusqlite::params![
@@ -58,8 +58,22 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
                 row.text_clean,
                 row.clean_hash,
                 row.token_count,
-                row.embedding
             ])?;
+
+            let chunk_id = tx.last_insert_rowid();
+            if !row.embedding.is_empty() {
+                let dim = row.embedding.len() / 4;
+                tx.execute(
+                    "INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+                     VALUES (?, ?, '1', ?, ?, strftime('%s','now'))",
+                    rusqlite::params![
+                        chunk_id,
+                        crate::constants::EMBEDDING_MODEL,
+                        dim,
+                        row.embedding,
+                    ],
+                )?;
+            }
         }
     }
     tx.commit()?;
@@ -67,12 +81,16 @@ pub fn insert(conn: &mut Connection, note_id: i64, rows: Vec<FragmentInsertRow>)
 }
 
 /// Returns all `level = 1` fragments for `note_id`, ordered by `order_index`.
-pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Fragment>, AppError> {
+pub fn list_by_note(conn: &Connection, note_id: i64, embedding_model: &str) -> Result<Vec<Fragment>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT chunk_id, note_id, order_index, clean_text, clean_text_hash, token_count, embedding, parent_chunk_id
-         FROM chunks WHERE note_id = ? AND level = 1 ORDER BY order_index ASC"
+        "SELECT c.chunk_id, c.note_id, c.order_index, c.clean_text, c.clean_text_hash, c.token_count, ce.embedding, c.parent_chunk_id
+         FROM chunks c
+         LEFT JOIN chunk_embeddings ce ON ce.chunk_id = c.chunk_id 
+           AND ce.embedding_model = ?2 AND ce.embedding_model_version = '1'
+         WHERE c.note_id = ?1 AND c.level = 1
+         ORDER BY c.order_index ASC"
     )?;
-    let rows = stmt.query_map([note_id], |row| {
+    let rows = stmt.query_map(rusqlite::params![note_id, embedding_model], |row| {
         let parent_chunk_id: Option<i64> = row.get(7)?;
         Ok(Fragment {
             id: FragmentId(row.get(0)?),
@@ -89,7 +107,7 @@ pub fn list_by_note(conn: &Connection, note_id: i64) -> Result<Vec<Fragment>, Ap
 }
 
 /// Updates an existing fragment's clean text and hash.
-/// If `clear_embedding` is `true`, sets `embedding = NULL` so the embedder knows it needs refreshing.
+/// If `clear_embedding` is `true`, deletes the embedding from `chunk_embeddings` so it needs refreshing.
 pub fn update(
     conn: &Connection,
     note_id: i64,
@@ -101,19 +119,17 @@ pub fn update(
 ) -> Result<(), AppError> {
     if clear_embedding {
         conn.execute(
-            "UPDATE chunks 
-             SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, embedding = NULL, parent_chunk_id = ? 
-             WHERE note_id = ? AND order_index = ? AND level = 1",
-            rusqlite::params![text_clean, clean_hash, text_clean, clean_hash, parent_chunk_id, note_id, index],
-        )?;
-    } else {
-        conn.execute(
-            "UPDATE chunks 
-             SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, parent_chunk_id = ? 
-             WHERE note_id = ? AND order_index = ? AND level = 1",
-            rusqlite::params![text_clean, clean_hash, text_clean, clean_hash, parent_chunk_id, note_id, index],
+            "DELETE FROM chunk_embeddings 
+             WHERE chunk_id = (SELECT chunk_id FROM chunks WHERE note_id = ?1 AND order_index = ?2 AND level = 1)",
+            rusqlite::params![note_id, index],
         )?;
     }
+    conn.execute(
+        "UPDATE chunks 
+         SET raw_text = ?, raw_text_hash = ?, clean_text = ?, clean_text_hash = ?, parent_chunk_id = ? 
+         WHERE note_id = ? AND order_index = ? AND level = 1",
+        rusqlite::params![text_clean, clean_hash, text_clean, clean_hash, parent_chunk_id, note_id, index],
+    )?;
     Ok(())
 }
 
@@ -130,11 +146,22 @@ pub fn insert_single(
     parent_chunk_id: Option<i64>,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, parent_chunk_id, kind)
-         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'fragment')",
-        rusqlite::params![note_id, index, text_clean, clean_hash, text_clean, clean_hash, token_count, embedding, parent_chunk_id],
+        "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, parent_chunk_id, kind)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, 'fragment')",
+        rusqlite::params![note_id, index, text_clean, clean_hash, text_clean, clean_hash, token_count, parent_chunk_id],
     )?;
-    Ok(conn.last_insert_rowid())
+    let chunk_id = conn.last_insert_rowid();
+
+    if !embedding.is_empty() {
+        let dim = embedding.len() / 4;
+        conn.execute(
+            "INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+             VALUES (?, ?, '1', ?, ?, strftime('%s','now'))",
+            rusqlite::params![chunk_id, crate::constants::EMBEDDING_MODEL, dim, embedding],
+        )?;
+    }
+
+    Ok(chunk_id)
 }
 
 /// Writes the embedding blob for a specific fragment identified by `(note_id, order_index)`.
@@ -144,10 +171,20 @@ pub fn set_embedding(
     note_id: i64,
     index: i64,
     embedding: &[u8],
+    embedding_model: &str,
+    embedding_model_version: &str,
 ) -> Result<(), AppError> {
+    let chunk_id: i64 = conn.query_row(
+        "SELECT chunk_id FROM chunks WHERE note_id = ? AND order_index = ? AND level = 1",
+        rusqlite::params![note_id, index],
+        |r| r.get(0),
+    )?;
+
+    let dim = embedding.len() / 4;
     conn.execute(
-        "UPDATE chunks SET embedding = ? WHERE note_id = ? AND order_index = ? AND level = 1",
-        rusqlite::params![embedding, note_id, index],
+        "INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+         VALUES (?, ?, ?, ?, ?, strftime('%s','now'))",
+        rusqlite::params![chunk_id, embedding_model, embedding_model_version, dim, embedding],
     )?;
     Ok(())
 }
@@ -158,20 +195,23 @@ pub fn list_fragments_with_note(
     conn: &Connection,
     filter_note_id: Option<i64>,
     include_deleted: bool,
+    embedding_model: &str,
 ) -> Result<Vec<FragmentWithNote>, AppError> {
-    let mut sql = "SELECT frag.chunk_id, n.path_cached, frag.order_index, frag.clean_text, frag.clean_text_hash, frag.token_count, frag.embedding, frag.note_id, n.title, frag.parent_chunk_id
+    let mut sql = "SELECT frag.chunk_id, n.path_cached, frag.order_index, frag.clean_text, frag.clean_text_hash, frag.token_count, ce.embedding, frag.note_id, n.title, frag.parent_chunk_id
                    FROM chunks frag
                    JOIN notes n ON n.note_id = frag.note_id
+                   LEFT JOIN chunk_embeddings ce ON ce.chunk_id = frag.chunk_id
+                     AND ce.embedding_model = ?1 AND ce.embedding_model_version = '1'
                    WHERE frag.level = 1".to_string();
 
     let mut conditions = Vec::new();
-    let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::new();
+    let mut params: Vec<&dyn rusqlite::types::ToSql> = vec![&embedding_model];
 
     if !include_deleted {
         conditions.push("n.lifecycle != 'deleted'");
     }
     if let Some(ref note_id) = filter_note_id {
-        conditions.push("n.note_id = ?");
+        conditions.push("n.note_id = ?2");
         params.push(note_id);
     }
 

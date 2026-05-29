@@ -114,6 +114,7 @@ pub fn fetch(
             conn,
             query.note_id.map(|id| id.0),
             include_deleted,
+            crate::constants::EMBEDDING_MODEL,
         )
     })?;
 

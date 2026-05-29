@@ -176,11 +176,11 @@ pub async fn run_calibration(state: &DbState) -> Result<CalibrationReport, AppEr
             crate::services::indexer::persist_indexed_file(&mut mem_conn, payload)?;
 
             // Embed fragments
-            let fragments = crate::db::repos::fragments::list_by_note(&mem_conn, note_id.0)?;
+            let fragments = crate::db::repos::fragments::list_by_note(&mem_conn, note_id.0, crate::ai::embedding::CURRENT_EMBEDDING_MODEL)?;
             for frag in &fragments {
                 let emb = embedder.embed(&frag.text_clean).await?;
                 let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb);
-                crate::db::repos::fragments::set_embedding(&mem_conn, note_id.0, frag.fragment_index, emb_bytes)?;
+                crate::db::repos::fragments::set_embedding(&mem_conn, note_id.0, frag.fragment_index, emb_bytes, crate::ai::embedding::CURRENT_EMBEDDING_MODEL, "1")?;
             }
         }
 

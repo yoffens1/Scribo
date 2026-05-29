@@ -67,8 +67,8 @@ pub fn mark_stale_for_model_change(
 
     for (note_id, _, _) in &report.stale_notes {
         tx.execute(
-            "UPDATE chunks SET embedding = NULL
-             WHERE note_id = ?1",
+            "DELETE FROM chunk_embeddings
+             WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE note_id = ?1)",
             params![note_id],
         ).map_err(|e| e.to_string())?;
         tx.execute(

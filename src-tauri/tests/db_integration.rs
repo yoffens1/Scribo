@@ -92,8 +92,13 @@ mod tests {
             };
             let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, embedding, kind) VALUES (?, 1, 0, 'Line one of text', 'hash1', 'Line one of text', 'hash1', X'00', 'fragment')",
+                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, kind) VALUES (?, 1, 0, 'Line one of text', 'hash1', 'Line one of text', 'hash1', 'fragment')",
                 [nid.0],
+            ).unwrap();
+            let chunk_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding) VALUES (?, ?, '1', 1, X'00')",
+                rusqlite::params![chunk_id, scribo_lib::constants::EMBEDDING_MODEL],
             ).unwrap();
             Ok(nid.0)
         }).unwrap();
@@ -123,12 +128,23 @@ mod tests {
             };
             let nid = scribo_lib::db::repos::notes::insert(conn, &note).unwrap();
             conn.execute(
-                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, kind) VALUES (?, 1, 0, 'This is a note about neural networks and machine learning.', 'hash1', 'This is a note about neural networks and machine learning.', 'hash1', 10, X'0000803f', 'fragment')",
+                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, kind) VALUES (?, 1, 0, 'This is a note about neural networks and machine learning.', 'hash1', 'This is a note about neural networks and machine learning.', 'hash1', 10, 'fragment')",
                 [nid.0],
             ).unwrap();
+            let chunk_id1 = conn.last_insert_rowid();
             conn.execute(
-                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, embedding, kind) VALUES (?, 1, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 'Obsidian is a great tool for personal knowledge management.', 'hash2', 9, X'0000803f', 'fragment')",
+                "INSERT INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding) VALUES (?, ?, '1', 1, X'0000803f')",
+                rusqlite::params![chunk_id1, scribo_lib::constants::EMBEDDING_MODEL],
+            ).unwrap();
+
+            conn.execute(
+                "INSERT INTO chunks (note_id, level, order_index, raw_text, raw_text_hash, clean_text, clean_text_hash, token_count, kind) VALUES (?, 1, 1, 'Obsidian is a great tool for personal knowledge management.', 'hash2', 'Obsidian is a great tool for personal knowledge management.', 'hash2', 9, 'fragment')",
                 [nid.0],
+            ).unwrap();
+            let chunk_id2 = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding) VALUES (?, ?, '1', 1, X'0000803f')",
+                rusqlite::params![chunk_id2, scribo_lib::constants::EMBEDDING_MODEL],
             ).unwrap();
             Ok(nid.0)
         }).unwrap();
@@ -333,14 +349,14 @@ mod tests {
 
             // 4b. Fetch fragments that need embeddings
             let fragments = db_state.with_conn(|conn| {
-                scribo_lib::db::repos::fragments::list_by_note(conn, note_id.0)
+                scribo_lib::db::repos::fragments::list_by_note(conn, note_id.0, scribo_lib::ai::embedding::CURRENT_EMBEDDING_MODEL)
             }).unwrap();
 
             // 4c. Generate embeddings asynchronously
             let mut fragment_embeddings: Vec<(i64, Vec<f32>)> = Vec::new();
             for frag in fragments {
                 let emb = embedder.embed(&frag.text_clean).await.unwrap();
-                assert_eq!(emb.len(), 384, "Embedding dimension should be 384");
+                assert_eq!(emb.len(), scribo_lib::constants::EMBEDDING_DIM, "Embedding dimension should match EMBEDDING_DIM");
                 fragment_embeddings.push((frag.fragment_index, emb));
             }
 
@@ -348,7 +364,7 @@ mod tests {
             db_state.with_write(|conn| {
                 for (index, emb) in fragment_embeddings {
                     let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb).to_vec();
-                    scribo_lib::db::repos::fragments::set_embedding(conn, note_id.0, index, &emb_bytes)?;
+                    scribo_lib::db::repos::fragments::set_embedding(conn, note_id.0, index, &emb_bytes, scribo_lib::ai::embedding::CURRENT_EMBEDDING_MODEL, "1")?;
                 }
 
                 let sections = scribo_lib::db::repos::sections::list_by_note(conn, note_id.0)?;
@@ -376,7 +392,12 @@ mod tests {
             assert!(note_count > 0, "Should have successfully imported at least one note");
 
             // Verify fragments
-            let mut stmt = conn.prepare("SELECT chunk_id, note_id, clean_text, embedding FROM chunks WHERE level = 1")?;
+            let mut stmt = conn.prepare(
+                "SELECT c.chunk_id, c.note_id, c.clean_text, ce.embedding 
+                 FROM chunks c
+                 JOIN chunk_embeddings ce ON ce.chunk_id = c.chunk_id
+                 WHERE c.level = 1"
+            )?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next().unwrap() {
                 let text_clean: String = row.get(2).unwrap();
@@ -388,8 +409,8 @@ mod tests {
                 assert!(!text_clean.starts_with("## "), "Clean fragment text should not start with header: {}", text_clean);
                 assert!(!text_clean.starts_with("### "), "Clean fragment text should not start with header: {}", text_clean);
 
-                // Check embedding matches expected size (384 * 4 bytes)
-                assert_eq!(embedding.len(), 384 * 4, "Embedding blob should be 1536 bytes (384 floats)");
+                // Check embedding matches expected size (EMBEDDING_DIM * 4 bytes)
+                assert_eq!(embedding.len(), scribo_lib::constants::EMBEDDING_DIM * 4, "Embedding blob should match EMBEDDING_DIM floats");
             }
 
             // Verify cards render raw markdown

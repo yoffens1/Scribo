@@ -127,16 +127,20 @@ impl LocalLlm {
 
     pub fn embed_sync(&self, text: &str) -> Result<Vec<f32>, String> {
         let backend = crate::ai::models::manager::get_backend()?;
+        let n_ctx_val = self.model.n_ctx_train() as u32;
+        let n_ctx_val = if n_ctx_val > 0 { n_ctx_val } else { 512 };
+        let n_ctx_val = n_ctx_val.min(2048);
+
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(std::num::NonZeroU32::new(crate::constants::EMBEDDING_CTX as u32).unwrap()))
-            .with_n_batch(crate::constants::EMBEDDING_CTX as u32)
-            .with_n_ubatch(crate::constants::EMBEDDING_CTX as u32)
+            .with_n_ctx(Some(std::num::NonZeroU32::new(n_ctx_val).unwrap()))
+            .with_n_batch(n_ctx_val)
+            .with_n_ubatch(n_ctx_val)
             .with_embeddings(true);
         let mut ctx = self.model.new_context(backend, ctx_params).map_err(|e| e.to_string())?;
 
         let mut tokens_list = self.model.str_to_token(text, AddBos::Always).map_err(|e| e.to_string())?;
-        if tokens_list.len() > crate::constants::EMBEDDING_CTX {
-            tokens_list.truncate(crate::constants::EMBEDDING_CTX);
+        if tokens_list.len() > n_ctx_val as usize {
+            tokens_list.truncate(n_ctx_val as usize);
         }
 
         let mut batch = LlamaBatch::new(tokens_list.len(), 1);

@@ -48,10 +48,10 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
     let is_fresh = !table_exists(conn, "meta")?;
 
     if is_fresh {
-        println!("Init: fresh database, creating all tables directly at v17");
+        println!("Init: fresh database, creating all tables directly at v18");
         tables::create_schema(conn)?;
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', '17')",
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '18')",
             [],
         )?;
         conn.execute(
@@ -524,9 +524,48 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
             version = "17".to_string();
         }
 
-        if version != "17" {
+        if version == "17" {
+            println!("Init: upgrading database from v17 to v18 (independent chunk_embeddings)");
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS chunk_embeddings (
+                    chunk_id                INTEGER NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+                    embedding_model         TEXT NOT NULL,
+                    embedding_model_version TEXT NOT NULL,
+                    dim                     INTEGER NOT NULL,
+                    embedding               BLOB NOT NULL,
+                    embedded_at             INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    PRIMARY KEY (chunk_id, embedding_model, embedding_model_version)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chunk_emb_model
+                    ON chunk_embeddings(embedding_model, embedding_model_version);
+
+                INSERT INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+                SELECT chunk_id,
+                       COALESCE(embedding_model, 'granite-embedding-97M-multilingual-r2-BF16'),
+                       COALESCE(embedding_model_version, '1'),
+                       COALESCE(length(embedding) / 4, 384),
+                       embedding,
+                       COALESCE(embedded_at, strftime('%s','now'))
+                FROM chunks
+                WHERE embedding IS NOT NULL;
+
+                DROP INDEX IF EXISTS idx_chunks_embedded_alive;
+
+                ALTER TABLE chunks DROP COLUMN embedding;
+                ALTER TABLE chunks DROP COLUMN embedding_source;
+                ALTER TABLE chunks DROP COLUMN embedding_model;
+                ALTER TABLE chunks DROP COLUMN embedding_model_version;
+                ALTER TABLE chunks DROP COLUMN embedded_at;
+
+                UPDATE meta SET value = '18' WHERE key = 'schema_version';"
+            )?;
+            version = "18".to_string();
+        }
+
+        if version != "18" {
             return Err(AppError::Other(format!(
-                "Unsupported database version: got {}, expected 17", version
+                "Unsupported database version: got {}, expected 18", version
             )));
         }
     }

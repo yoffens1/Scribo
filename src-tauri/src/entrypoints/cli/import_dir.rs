@@ -62,7 +62,7 @@ pub fn handle_import_dir(conn: &mut Connection, dir_path_str: &str) {
                 continue;
             }
 
-            let fragments = match crate::db::repos::fragments::list_by_note(conn, note_id.0) {
+            let fragments = match crate::db::repos::fragments::list_by_note(conn, note_id.0, crate::constants::EMBEDDING_MODEL) {
                 Ok(frags) => frags,
                 Err(e) => {
                     eprintln!("Error listing fragments for {}: {}", file_name, e);
@@ -85,7 +85,7 @@ pub fn handle_import_dir(conn: &mut Connection, dir_path_str: &str) {
             let mut error_occurred = false;
             for (index, emb) in fragment_embeddings {
                 let emb_bytes = bytemuck::cast_slice::<f32, u8>(&emb);
-                if let Err(e) = crate::db::repos::fragments::set_embedding(conn, note_id.0, index, emb_bytes) {
+                if let Err(e) = crate::db::repos::fragments::set_embedding(conn, note_id.0, index, emb_bytes, crate::constants::EMBEDDING_MODEL, "1") {
                     eprintln!("Error saving embedding for {}: {}", file_name, e);
                     error_occurred = true;
                     break;

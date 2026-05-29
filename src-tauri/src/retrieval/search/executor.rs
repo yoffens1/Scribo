@@ -153,7 +153,7 @@ async fn retrieve_for_variant(
                     let pool_opt = pool.read();
                     let pool_actual = pool_opt.as_ref().ok_or(AppError::NotInitialized)?;
                     let mut conn = pool_actual.get().map_err(|e| AppError::Other(e.to_string()))?;
-                    let res = match fragments::vector_search(&mut conn, &bytes, target_level, over_fetch) {
+                    let res = match fragments::vector_search(&mut conn, &bytes, target_level, over_fetch, crate::constants::EMBEDDING_MODEL, crate::constants::INDEXING_VERSION) {
                         Ok(hits) => {
                             let results = hits.into_iter().map(|h| SearchResult {
                                 fragment_ref: FragmentRef {

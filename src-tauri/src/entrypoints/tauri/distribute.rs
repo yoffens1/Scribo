@@ -25,7 +25,12 @@ pub async fn distribute_analyze_draft(
 
 /// Mean-pools fragment embeddings (`level = 1`) into section embeddings (`level = 0`).
 /// Called during Phase 2 after new fragments have been embedded.
-pub fn compute_and_save_section_embeddings(conn: &rusqlite::Connection, note_id: i64) -> Result<(), AppError> {
+pub fn compute_and_save_section_embeddings(
+    conn: &rusqlite::Connection,
+    note_id: i64,
+    embedding_model: &str,
+    embedding_model_version: &str,
+) -> Result<(), AppError> {
     let mut stmt = conn.prepare(
         "SELECT chunk_id FROM chunks WHERE note_id = ? AND level = 0"
     )?;
@@ -34,9 +39,13 @@ pub fn compute_and_save_section_embeddings(conn: &rusqlite::Connection, note_id:
 
     for sec_id in section_ids {
         let mut stmt_frags = conn.prepare(
-            "SELECT embedding FROM chunks WHERE parent_chunk_id = ? AND level = 1 AND embedding IS NOT NULL"
+            "SELECT ce.embedding 
+             FROM chunk_embeddings ce
+             JOIN chunks frag ON frag.chunk_id = ce.chunk_id
+             WHERE frag.parent_chunk_id = ?1 AND frag.level = 1 
+               AND ce.embedding_model = ?2 AND ce.embedding_model_version = ?3"
         )?;
-        let frags: Vec<Vec<u8>> = stmt_frags.query_map([sec_id], |r| r.get(0))?
+        let frags: Vec<Vec<u8>> = stmt_frags.query_map(rusqlite::params![sec_id, embedding_model, embedding_model_version], |r| r.get(0))?
             .collect::<Result<Vec<Vec<u8>>, _>>()?;
 
         if frags.is_empty() {
@@ -63,9 +72,11 @@ pub fn compute_and_save_section_embeddings(conn: &rusqlite::Connection, note_id:
                 *val /= count as f32;
             }
             let mean_bytes = bytemuck::cast_slice::<f32, u8>(&sum_vec);
+            let dim = sum_vec.len();
             conn.execute(
-                "UPDATE chunks SET embedding = ?, embedding_source = 'mean_pool' WHERE chunk_id = ?",
-                rusqlite::params![mean_bytes, sec_id],
+                "INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding_model_version, dim, embedding, embedded_at)
+                 VALUES (?, ?, ?, ?, ?, strftime('%s','now'))",
+                rusqlite::params![sec_id, embedding_model, embedding_model_version, dim, mean_bytes],
             )?;
         }
     }
@@ -110,12 +121,12 @@ pub async fn distribute_apply_plan(
     })?;
 
     // Generate fragment embeddings for all affected note IDs with cache lookup
+    let model_name = &llm_config.model;
     for &note_id in &affected_note_ids {
         let fragments = state.with_conn(|conn| {
-            crate::db::repos::fragments::list_by_note(conn, note_id)
+            crate::db::repos::fragments::list_by_note(conn, note_id, model_name)
         })?;
 
-        let model_name = &llm_config.model;
         let mut final_embeddings = vec![None; fragments.len()];
         let mut cache_miss_indices = Vec::new();
         let mut cache_miss_texts = Vec::new();
@@ -165,14 +176,14 @@ pub async fn distribute_apply_plan(
             for (idx, frag) in fragments.iter().enumerate() {
                 if let Some(ref emb_bytes) = final_embeddings[idx] {
                     let frag_idx = frag.fragment_index;
-                    if let Err(e) = crate::db::repos::fragments::set_embedding(conn, note_id, frag_idx, emb_bytes) {
+                    if let Err(e) = crate::db::repos::fragments::set_embedding(conn, note_id, frag_idx, emb_bytes, model_name, "1") {
                         eprintln!("Failed to set embedding for note {} fragment {}: {}", note_id, frag_idx, e);
                     }
                 }
             }
 
             // Compute section embeddings via mean pooling
-            if let Err(e) = compute_and_save_section_embeddings(conn, note_id) {
+            if let Err(e) = compute_and_save_section_embeddings(conn, note_id, model_name, "1") {
                 eprintln!("Failed to compute section embeddings for note {}: {}", note_id, e);
             }
             Ok(())

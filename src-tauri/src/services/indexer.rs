@@ -135,7 +135,7 @@ pub fn persist_indexed_file(
         .ok_or_else(|| AppError::Other(format!("Note not found: {}", note_id)))?;
 
     // 2. Fetch existing fragments & sections for hash-based diff
-    let old_fragments = crate::db::repos::fragments::list_by_note(conn, note_id)
+    let old_fragments = crate::db::repos::fragments::list_by_note(conn, note_id, payload.embedding_model)
         .map_err(|e| AppError::Other(e.to_string()))?;
     let old_sections = crate::db::repos::sections::list_by_note(conn, note_id)
         .map_err(|e| AppError::Other(e.to_string()))?;

@@ -156,8 +156,9 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
 
                 // Embedder stage
                 println!("[Embedder] Computing fragment embeddings...");
+                let model_name = &llm_config.model;
                 for &id in &affected_note_ids {
-                    let fragments = match crate::db::repos::fragments::list_by_note(conn, id) {
+                    let fragments = match crate::db::repos::fragments::list_by_note(conn, id, model_name) {
                         Ok(frags) => frags,
                         Err(e) => {
                             println!("[Embedder] Failed to list fragments for note {}: {}", id, e);
@@ -165,7 +166,6 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
                         }
                     };
 
-                    let model_name = &llm_config.model;
                     let mut final_embeddings = vec![None; fragments.len()];
                     let mut cache_miss_indices = Vec::new();
                     let mut cache_miss_texts = Vec::new();
@@ -197,7 +197,7 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
                                 let _ = conn.execute(
                                     "INSERT OR REPLACE INTO embedding_cache (clean_text_hash, embedding_model, embedding_model_version, embedding, created_at)
                                      VALUES (?, ?, '1', ?, strftime('%s','now'))",
-                                    rusqlite::params![clean_hash, model_name, emb_bytes],
+                                     rusqlite::params![clean_hash, model_name, emb_bytes],
                                 );
                                 
                                 final_embeddings[frag_idx] = Some(emb_bytes.to_vec());
@@ -211,14 +211,14 @@ pub fn handle_distribute(conn: &mut Connection, db_path: &Path, note_id: i64) {
                     for (idx, frag) in fragments.iter().enumerate() {
                         if let Some(ref emb_bytes) = final_embeddings[idx] {
                             let frag_idx = frag.fragment_index;
-                            if let Err(e) = crate::db::repos::fragments::set_embedding(conn, id, frag_idx, emb_bytes) {
+                            if let Err(e) = crate::db::repos::fragments::set_embedding(conn, id, frag_idx, emb_bytes, model_name, "1") {
                                 println!("[Embedder] Failed to set embedding for note {} fragment {}: {}", id, frag_idx, e);
                             }
                         }
                     }
 
                     // Compute section embeddings via mean pooling
-                    if let Err(e) = crate::commands::distribute::compute_and_save_section_embeddings(conn, id) {
+                    if let Err(e) = crate::commands::distribute::compute_and_save_section_embeddings(conn, id, model_name, "1") {
                         println!("[Embedder] Failed to compute section embeddings for note {}: {}", id, e);
                     } else {
                         println!("[Embedder] Section embeddings pooled and updated for note {}.", id);
