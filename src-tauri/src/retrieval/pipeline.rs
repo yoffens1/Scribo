@@ -8,7 +8,7 @@ use crate::db::repos::fragments;
 use crate::retrieval::types::{
     RetrievalConfig, RetrieveOptions, RetrieveFilters, SearchResult, FetchQuery, FetchResult,
 };
-use crate::retrieval::fusion::{rrf, apply_term_boost};
+use crate::retrieval::search::{rrf, apply_term_boost};
 use crate::retrieval::config_resolver::resolve_config;
 use crate::retrieval::context::RetrievalContext;
 

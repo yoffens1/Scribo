@@ -4,7 +4,7 @@
 //! based on Mean Reciprocal Rank (MRR) metrics over a set of evaluation samples.
 
 use crate::retrieval::types::SearchResult;
-use crate::retrieval::fusion::rrf;
+use crate::retrieval::search::rrf;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
