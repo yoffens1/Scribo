@@ -88,9 +88,10 @@ pub async fn retrieve(
                 let vault_lang = &ctx.vault_lang;
                 let detected_lang = &ctx.detected_lang;
 
-                // Only translate if the target language is different from the query language,
-                // OR if detected lang is unknown (short query — whatlang unsure)
-                let should_translate = detected_lang != vault_lang || detected_lang == "en" && variant_lists.iter().all(|(_, _, h)| *h < LOW_KEYWORD_RECALL_THRESHOLD);
+                // Translate if query lang differs from vault lang,
+                // OR all variants have poor keyword recall (ambiguous/short query).
+                let should_translate = (detected_lang != vault_lang)
+                    || (variant_lists.iter().all(|(_, _, h)| *h < LOW_KEYWORD_RECALL_THRESHOLD));
 
                 if should_translate {
                     let model_id = llm.config().model.clone();
@@ -128,6 +129,12 @@ pub async fn retrieve(
                         }
                     }
                 }
+            } else {
+                tracing::warn!(
+                    original_kw_hits,
+                    "Low keyword recall but no LLM available — translate-fallback skipped. \
+                     Configure an LLM in settings to enable automatic query translation."
+                );
             }
         }
     }
